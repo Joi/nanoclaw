@@ -3,11 +3,13 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   SIGNAL_ACCOUNT,
   SIGNAL_CLI_URL,
+  SIGNAL_DEFAULT_TIER,
   SIGNAL_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -103,6 +105,53 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+/**
+ * Auto-register a new Signal DM contact using the default tier template.
+ * Creates a per-contact folder (sig-{phone}) with CLAUDE.md copied from the template.
+ */
+function autoRegisterSignalContact(chatJid: string, senderName: string): boolean {
+  if (!SIGNAL_DEFAULT_TIER) return false;
+
+  // Extract phone from JID (sig:+819048411965 → 819048411965)
+  const phone = chatJid.replace(/^sig:\+?/, '');
+  const folder = `sig-${phone}`;
+  const displayName = senderName || phone;
+
+  // Check template folder exists
+  const templateDir = path.join(GROUPS_DIR, SIGNAL_DEFAULT_TIER);
+  const templateClaudeMd = path.join(templateDir, 'CLAUDE.md');
+  if (!fs.existsSync(templateClaudeMd)) {
+    logger.warn(
+      { template: SIGNAL_DEFAULT_TIER, chatJid },
+      'Signal default tier template CLAUDE.md not found, skipping auto-registration',
+    );
+    return false;
+  }
+
+  const group: RegisteredGroup = {
+    name: displayName,
+    folder,
+    trigger: `@${ASSISTANT_NAME}`,
+    added_at: new Date().toISOString(),
+    requiresTrigger: true,
+  };
+
+  registerGroup(chatJid, group);
+
+  // Copy CLAUDE.md from template
+  const groupDir = path.join(GROUPS_DIR, folder);
+  const destClaudeMd = path.join(groupDir, 'CLAUDE.md');
+  if (!fs.existsSync(destClaudeMd)) {
+    fs.copyFileSync(templateClaudeMd, destClaudeMd);
+  }
+
+  logger.info(
+    { chatJid, folder, template: SIGNAL_DEFAULT_TIER, senderName: displayName },
+    'Auto-registered new Signal contact',
+  );
+  return true;
 }
 
 /**
@@ -461,6 +510,9 @@ async function main(): Promise<void> {
       ...channelOpts,
       signalCliUrl: SIGNAL_CLI_URL,
       signalAccount: SIGNAL_ACCOUNT,
+      onNewContact: SIGNAL_DEFAULT_TIER ? (chatJid, senderName) => {
+        return autoRegisterSignalContact(chatJid, senderName);
+      } : undefined,
     });
     channels.push(signal);
     try {

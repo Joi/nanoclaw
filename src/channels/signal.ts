@@ -1,8 +1,9 @@
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 3000;
 const RECEIVE_TIMEOUT_S = 1; // signal-cli receive timeout in seconds
+const RECEIVE_FETCH_TIMEOUT_MS = RECEIVE_TIMEOUT_S * 1000 + 5000; // HTTP timeout for receive calls
 
 export interface SignalChannelOpts {
   onMessage: OnInboundMessage;
@@ -10,6 +11,9 @@ export interface SignalChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
   signalCliUrl: string;
   signalAccount: string;
+  // Called when a DM arrives from an unregistered contact.
+  // Returns true if the contact was auto-registered and the message should be stored.
+  onNewContact?: (chatJid: string, senderName: string) => boolean;
 }
 
 // JSON-RPC types
@@ -134,14 +138,14 @@ export class SignalChannel implements Channel {
 
   // --- JSON-RPC helper ---
 
-  private async rpc<T>(method: string, params: Record<string, unknown>): Promise<T | null> {
+  private async rpc<T>(method: string, params: Record<string, unknown>, timeoutMs = 15000): Promise<T | null> {
     const id = ++this.rpcId;
     try {
       const res = await fetch(this.rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', method, params, id }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) {
         logger.warn({ status: res.status, method }, 'JSON-RPC HTTP error');
@@ -149,6 +153,12 @@ export class SignalChannel implements Channel {
       }
       const body = (await res.json()) as JsonRpcResponse<T>;
       if (body.error) {
+        // "already being received" is a benign race — signal-cli's previous
+        // receive hasn't finished server-side. Suppress to avoid log noise.
+        if (method === 'receive' && body.error.message?.includes('already being received')) {
+          logger.debug('signal-cli receive overlap, skipping');
+          return null;
+        }
         logger.warn({ method, error: body.error }, 'JSON-RPC error');
         return null;
       }
@@ -165,15 +175,16 @@ export class SignalChannel implements Channel {
     if (this.polling) return;
     this.polling = true;
     try {
-    const entries = await this.rpc<SignalReceiveEntry[]>('receive', {
-      timeout: RECEIVE_TIMEOUT_S,
-    });
+      const entries = await this.rpc<SignalReceiveEntry[]>('receive', {
+        account: this.account,
+        timeout: RECEIVE_TIMEOUT_S,
+      }, RECEIVE_FETCH_TIMEOUT_MS);
 
-    if (!entries || entries.length === 0) return;
+      if (!entries || entries.length === 0) return;
 
-    for (const entry of entries) {
-      this.handleEntry(entry);
-    }
+      for (const entry of entries) {
+        this.handleEntry(entry);
+      }
     } finally {
       this.polling = false;
     }
@@ -229,8 +240,15 @@ export class SignalChannel implements Channel {
     // Notify chat metadata
     this.opts.onChatMetadata(chatJid, timestamp, isGroup ? undefined : senderName, 'signal', isGroup);
 
-    // Deliver to registered groups
-    const groups = this.opts.registeredGroups();
+    // Deliver to registered groups (or auto-register new Signal DM contacts)
+    let groups = this.opts.registeredGroups();
+    if (!groups[chatJid] && !isGroup && !isFromMe && this.opts.onNewContact) {
+      const registered = this.opts.onNewContact(chatJid, senderName);
+      if (registered) {
+        // Refresh groups after auto-registration
+        groups = this.opts.registeredGroups();
+      }
+    }
     if (groups[chatJid]) {
       const newMsg: NewMessage = {
         id: msgId,
@@ -255,12 +273,14 @@ export class SignalChannel implements Channel {
     if (isGroup) {
       const groupId = jid.replace('sig:group:', '');
       params = {
+        account: this.account,
         groupId,
         message: text,
       };
     } else {
       const recipient = jid.replace('sig:', '');
       params = {
+        account: this.account,
         recipient: [recipient],
         message: text,
       };

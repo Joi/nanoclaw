@@ -12,6 +12,7 @@ const envConfig = readEnvFile([
   'SIGNAL_CLI_URL',
   'SIGNAL_ACCOUNT',
   'SIGNAL_ONLY',
+  'SIGNAL_DEFAULT_TIER',
 ]);
 
 export const ASSISTANT_NAME =
@@ -22,6 +23,8 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const SIGNAL_CLI_URL = process.env.SIGNAL_CLI_URL || envConfig.SIGNAL_CLI_URL || 'http://127.0.0.1:8080';
 export const SIGNAL_ACCOUNT = process.env.SIGNAL_ACCOUNT || envConfig.SIGNAL_ACCOUNT || '';
 export const SIGNAL_ONLY = (process.env.SIGNAL_ONLY || envConfig.SIGNAL_ONLY) === 'true';
+// Template folder for auto-registering unknown Signal DM contacts (e.g. 'assistant-dm')
+export const SIGNAL_DEFAULT_TIER = process.env.SIGNAL_DEFAULT_TIER || envConfig.SIGNAL_DEFAULT_TIER || '';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
