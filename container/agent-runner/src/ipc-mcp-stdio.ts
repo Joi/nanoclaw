@@ -280,6 +280,178 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+
+// ── Apple Reminders tools (conditional on NANOCLAW_REMINDERS_ACCESS) ──
+
+const hasRemindersAccess = process.env.NANOCLAW_REMINDERS_ACCESS === '1';
+
+if (hasRemindersAccess) {
+  const REMINDERS_DIR = path.join(IPC_DIR, 'reminders');
+
+  function writeRemindersIpc(data: object): string {
+    fs.mkdirSync(REMINDERS_DIR, { recursive: true });
+    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
+    const filepath = path.join(REMINDERS_DIR, filename);
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+    fs.renameSync(tempPath, filepath);
+    return filename;
+  }
+
+  function readRemindersSnapshot(): object | null {
+    const snapshotPath = path.join(IPC_DIR, 'reminders_snapshot.json');
+    try {
+      if (fs.existsSync(snapshotPath)) {
+        return JSON.parse(fs.readFileSync(snapshotPath, 'utf-8'));
+      }
+    } catch {}
+    return null;
+  }
+
+  server.tool(
+    'list_reminders',
+    `List Apple Reminders. Shows all incomplete reminders across synced lists (Inbox, Next Actions, Waiting For, Someday/Maybe, Joi/Mika To Do).
+Reminders are sorted with overdue items first, then by due date. Each reminder has an id, title, list_name, due_date, priority, and notes.`,
+    {
+      list_name: z.string().optional().describe('Filter to a specific list (e.g., "Inbox", "Next Actions", "Waiting For")'),
+    },
+    async (args) => {
+      const snapshot = readRemindersSnapshot();
+      if (!snapshot) {
+        return {
+          content: [{ type: 'text' as const, text: 'Reminders data not available. It may still be loading.' }],
+        };
+      }
+
+      const data = snapshot as { reminders?: Array<Record<string, unknown>>; by_list?: Record<string, Array<Record<string, unknown>>>; total?: number };
+
+      if (args.list_name) {
+        const byList = data.by_list || {};
+        // Case-insensitive match
+        const key = Object.keys(byList).find(k => k.toLowerCase() === args.list_name!.toLowerCase());
+        if (!key) {
+          const available = Object.keys(byList).join(', ');
+          return {
+            content: [{ type: 'text' as const, text: `List "${args.list_name}" not found. Available: ${available}` }],
+          };
+        }
+        const items = byList[key];
+        const formatted = items.map((r: Record<string, unknown>) =>
+          `- [${r.priority ? '!' : ' '}] ${r.title}${r.due_date ? ` (due: ${r.due_date})` : ''}${r.notes ? ` — ${(r.notes as string).slice(0, 50)}` : ''}
+  ID: ${r.id}`
+        ).join('\n');
+        return {
+          content: [{ type: 'text' as const, text: `**${key}** (${items.length} items):\n${formatted}` }],
+        };
+      }
+
+      // Show all lists summary
+      const byList = data.by_list || {};
+      let output = `**All Reminders** (${data.total || 0} total)\n\n`;
+      for (const [listName, items] of Object.entries(byList)) {
+        output += `**${listName}** (${(items as unknown[]).length}):\n`;
+        for (const r of items as Array<Record<string, unknown>>) {
+          output += `- ${r.title}${r.due_date ? ` (due: ${r.due_date})` : ''}\n  ID: ${r.id}\n`;
+        }
+        output += '\n';
+      }
+      return { content: [{ type: 'text' as const, text: output }] };
+    },
+  );
+
+  server.tool(
+    'create_reminder',
+    'Create a new Apple Reminder. Defaults to the Inbox list.',
+    {
+      title: z.string().describe('The reminder title'),
+      list_name: z.string().default('Inbox').describe('Which list (Inbox, Next Actions, Waiting For, Someday/Maybe, Joi/Mika To Do)'),
+      due_date: z.string().optional().describe('Due date in YYYY-MM-DD format'),
+      notes: z.string().optional().describe('Additional notes'),
+      priority: z.number().optional().describe('Priority: 0=none, 1=high, 5=medium, 9=low'),
+    },
+    async (args) => {
+      writeRemindersIpc({
+        operation: 'create_reminder',
+        params: {
+          title: args.title,
+          list_name: args.list_name,
+          due_date: args.due_date,
+          notes: args.notes,
+          priority: args.priority || 0,
+        },
+      });
+      return {
+        content: [{ type: 'text' as const, text: `Reminder "${args.title}" created in ${args.list_name}.` }],
+      };
+    },
+  );
+
+  server.tool(
+    'complete_reminder',
+    'Mark an Apple Reminder as complete. Use the ID from list_reminders, or match by title.',
+    {
+      reminder_id: z.string().optional().describe('The reminder ID (from list_reminders)'),
+      title_match: z.string().optional().describe('Partial title match (case-insensitive)'),
+    },
+    async (args) => {
+      if (!args.reminder_id && !args.title_match) {
+        return {
+          content: [{ type: 'text' as const, text: 'Provide either reminder_id or title_match.' }],
+          isError: true,
+        };
+      }
+      writeRemindersIpc({
+        operation: 'complete_reminder',
+        params: {
+          reminder_id: args.reminder_id,
+          title_match: args.title_match,
+        },
+      });
+      return {
+        content: [{ type: 'text' as const, text: `Reminder completion requested.` }],
+      };
+    },
+  );
+
+  server.tool(
+    'update_reminder',
+    'Update an existing Apple Reminder (title, due date, notes, priority, or move to different list).',
+    {
+      reminder_id: z.string().optional().describe('The reminder ID'),
+      title_match: z.string().optional().describe('Partial title match to find the reminder'),
+      title: z.string().optional().describe('New title'),
+      due_date: z.string().optional().describe('New due date (YYYY-MM-DD or empty to clear)'),
+      notes: z.string().optional().describe('New notes'),
+      priority: z.number().optional().describe('New priority: 0=none, 1=high, 5=medium, 9=low'),
+      list_name: z.string().optional().describe('Move to this list'),
+    },
+    async (args) => {
+      if (!args.reminder_id && !args.title_match) {
+        return {
+          content: [{ type: 'text' as const, text: 'Provide either reminder_id or title_match.' }],
+          isError: true,
+        };
+      }
+      const params: Record<string, unknown> = {};
+      if (args.reminder_id) params.reminder_id = args.reminder_id;
+      if (args.title_match) params.title_match = args.title_match;
+      if (args.title !== undefined) params.title = args.title;
+      if (args.due_date !== undefined) params.due_date = args.due_date;
+      if (args.notes !== undefined) params.notes = args.notes;
+      if (args.priority !== undefined) params.priority = args.priority;
+      if (args.list_name !== undefined) params.list_name = args.list_name;
+
+      writeRemindersIpc({
+        operation: 'update_reminder',
+        params,
+      });
+      return {
+        content: [{ type: 'text' as const, text: 'Reminder update requested.' }],
+      };
+    },
+  );
+}
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

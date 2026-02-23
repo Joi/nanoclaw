@@ -44,6 +44,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { writeRemindersSnapshot } from './reminders.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -290,9 +291,10 @@ async function runAgent(
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
+  const canSeeAllTasks = isMain || !!group.canSeeAllTasks;
   writeTasksSnapshot(
     group.folder,
-    isMain,
+    canSeeAllTasks,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -312,6 +314,11 @@ async function runAgent(
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
+
+  // Write reminders snapshot if this group has access
+  if (group.remindersAccess) {
+    writeRemindersSnapshot(group.folder);
+  }
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
@@ -333,6 +340,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        remindersAccess: !!group.remindersAccess,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),

@@ -13,6 +13,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { processRemindersIpc } from './reminders.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -142,6 +143,43 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process reminders from this group's IPC directory
+      const remindersDir = path.join(ipcBaseDir, sourceGroup, 'reminders');
+      try {
+        if (fs.existsSync(remindersDir)) {
+          const reminderFiles = fs
+            .readdirSync(remindersDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of reminderFiles) {
+            const filePath = path.join(remindersDir, file);
+            try {
+              processRemindersIpc(filePath, sourceGroup);
+              fs.unlinkSync(filePath);
+              logger.info(
+                { file, sourceGroup },
+                'IPC reminder processed',
+              );
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC reminder',
+              );
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-${file}`),
+              );
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC reminders directory',
+        );
       }
     }
 

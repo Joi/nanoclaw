@@ -176,7 +176,6 @@ export class SignalChannel implements Channel {
     this.polling = true;
     try {
       const entries = await this.rpc<SignalReceiveEntry[]>('receive', {
-        account: this.account,
         timeout: RECEIVE_TIMEOUT_S,
       }, RECEIVE_FETCH_TIMEOUT_MS);
 
