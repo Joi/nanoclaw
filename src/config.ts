@@ -9,12 +9,19 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'SIGNAL_CLI_URL',
+  'SIGNAL_ACCOUNT',
+  'SIGNAL_ONLY',
 ]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+// Signal configuration
+export const SIGNAL_CLI_URL = process.env.SIGNAL_CLI_URL || envConfig.SIGNAL_CLI_URL || 'http://127.0.0.1:8080';
+export const SIGNAL_ACCOUNT = process.env.SIGNAL_ACCOUNT || envConfig.SIGNAL_ACCOUNT || '';
+export const SIGNAL_ONLY = (process.env.SIGNAL_ONLY || envConfig.SIGNAL_ONLY) === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

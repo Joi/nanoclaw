@@ -6,9 +6,13 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  SIGNAL_ACCOUNT,
+  SIGNAL_CLI_URL,
+  SIGNAL_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { SignalChannel } from './channels/signal.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -48,7 +52,7 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
+let whatsapp: WhatsAppChannel | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -445,9 +449,27 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  if (!SIGNAL_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
+
+  // Signal channel (if configured)
+  if (SIGNAL_ACCOUNT) {
+    const signal = new SignalChannel({
+      ...channelOpts,
+      signalCliUrl: SIGNAL_CLI_URL,
+      signalAccount: SIGNAL_ACCOUNT,
+    });
+    channels.push(signal);
+    try {
+      await signal.connect();
+      logger.info('Signal channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Signal channel');
+    }
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
