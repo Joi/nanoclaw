@@ -281,6 +281,43 @@ Use available_groups.json to find the JID for a group. The folder name should be
 );
 
 
+server.tool(
+  'link_account',
+  `Link a channel account (JID) to an existing group folder so they share the same session, CLAUDE.md, and context. Main group only.
+
+Use this when the same user has multiple channel accounts (e.g., Signal DM and Slack DM) that should share one agent folder.
+The target folder must already have at least one registered group — privileges (reminders, bookmarks) are copied from the existing entry.`,
+  {
+    jid: z.string().describe('The JID to link (e.g., "slack:U02GY1YS33Q", "sig:+1234567890")'),
+    target_folder: z.string().describe('The existing folder name to link to (e.g., "joi-dm")'),
+    name: z.string().optional().describe('Display name for this account (defaults to existing name)'),
+    requires_trigger: z.boolean().optional().describe('Whether this account needs a trigger word (defaults to existing setting)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can link accounts.' }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, unknown> = {
+      type: 'link_account',
+      jid: args.jid,
+      targetFolder: args.target_folder,
+      timestamp: new Date().toISOString(),
+    };
+    if (args.name) data.name = args.name;
+    if (args.requires_trigger !== undefined) data.requiresTrigger = args.requires_trigger;
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Account "${args.jid}" linked to folder "${args.target_folder}".` }],
+    };
+  },
+);
+
 // ── Apple Reminders tools (conditional on NANOCLAW_REMINDERS_ACCESS) ──
 
 const hasRemindersAccess = process.env.NANOCLAW_REMINDERS_ACCESS === '1';
@@ -447,6 +484,94 @@ Reminders are sorted with overdue items first, then by due date. Each reminder h
       });
       return {
         content: [{ type: 'text' as const, text: 'Reminder update requested.' }],
+      };
+    },
+  );
+}
+
+// ── Bookmark tools (conditional on NANOCLAW_BOOKMARKS_ACCESS) ──
+
+const hasBookmarksAccess = process.env.NANOCLAW_BOOKMARKS_ACCESS === '1';
+
+if (hasBookmarksAccess) {
+  const BOOKMARKS_DIR = path.join(IPC_DIR, 'bookmarks');
+
+  function writeBookmarkIpc(data: object): { reqFile: string; respFile: string } {
+    fs.mkdirSync(BOOKMARKS_DIR, { recursive: true });
+    const ts = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const reqFile = `req-${ts}.json`;
+    const respFile = `resp-${ts}.json`;
+    const filepath = path.join(BOOKMARKS_DIR, reqFile);
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({ ...data, responseFile: respFile }, null, 2));
+    fs.renameSync(tempPath, filepath);
+    return { reqFile, respFile };
+  }
+
+  async function waitForResponse(respFile: string, timeoutMs: number = 120_000): Promise<object> {
+    const respPath = path.join(BOOKMARKS_DIR, respFile);
+    const start = Date.now();
+    const pollInterval = 500;
+    while (Date.now() - start < timeoutMs) {
+      if (fs.existsSync(respPath)) {
+        const content = fs.readFileSync(respPath, 'utf-8');
+        fs.unlinkSync(respPath);
+        return JSON.parse(content);
+      }
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+    return { error: `Bookmark operation timed out after ${timeoutMs / 1000}s` };
+  }
+
+  server.tool(
+    'bookmark_url',
+    `Bookmark a URL for knowledge extraction. The bookmark service fetches the page, extracts clean markdown content, classifies it, and saves it to the knowledge base.
+Extraction can take 30-60 seconds. The result includes the file path, title, and classification.`,
+    {
+      url: z.string().describe('The URL to bookmark'),
+      hint: z.string().optional().describe('Classification hint: person, concept, organization, reference, event, or project'),
+    },
+    async (args) => {
+      const { respFile } = writeBookmarkIpc({
+        operation: 'bookmark_url',
+        params: { url: args.url, hint: args.hint },
+      });
+
+      const result = await waitForResponse(respFile);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'bookmark_health',
+    'Check if the bookmark extraction service is healthy and available.',
+    {},
+    async () => {
+      const { respFile } = writeBookmarkIpc({
+        operation: 'bookmark_health',
+      });
+
+      const result = await waitForResponse(respFile, 15_000);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+      };
+    },
+  );
+
+  server.tool(
+    'bookmark_recent',
+    'List recently bookmarked URLs and their extraction status.',
+    {},
+    async () => {
+      const { respFile } = writeBookmarkIpc({
+        operation: 'bookmark_recent',
+      });
+
+      const result = await waitForResponse(respFile, 15_000);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
       };
     },
   );

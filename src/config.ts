@@ -13,6 +13,14 @@ const envConfig = readEnvFile([
   'SIGNAL_ACCOUNT',
   'SIGNAL_ONLY',
   'SIGNAL_DEFAULT_TIER',
+  'SLACK_BOT_TOKEN',
+  'SLACK_APP_TOKEN',
+  'SLACK_SIGNING_SECRET',
+  'SLACK_2_BOT_TOKEN',
+  'SLACK_2_APP_TOKEN',
+  'SLACK_2_SIGNING_SECRET',
+  'SLACK_2_NAMESPACE',
+  'MAIN_GROUP_FOLDER',
 ]);
 
 export const ASSISTANT_NAME =
@@ -25,6 +33,15 @@ export const SIGNAL_ACCOUNT = process.env.SIGNAL_ACCOUNT || envConfig.SIGNAL_ACC
 export const SIGNAL_ONLY = (process.env.SIGNAL_ONLY || envConfig.SIGNAL_ONLY) === 'true';
 // Template folder for auto-registering unknown Signal DM contacts (e.g. 'assistant-dm')
 export const SIGNAL_DEFAULT_TIER = process.env.SIGNAL_DEFAULT_TIER || envConfig.SIGNAL_DEFAULT_TIER || '';
+// Slack configuration
+export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
+export const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || envConfig.SLACK_SIGNING_SECRET || '';
+// Second Slack workspace (e.g. CIT Administration)
+export const SLACK_2_BOT_TOKEN = process.env.SLACK_2_BOT_TOKEN || envConfig.SLACK_2_BOT_TOKEN || '';
+export const SLACK_2_APP_TOKEN = process.env.SLACK_2_APP_TOKEN || envConfig.SLACK_2_APP_TOKEN || '';
+export const SLACK_2_SIGNING_SECRET = process.env.SLACK_2_SIGNING_SECRET || envConfig.SLACK_2_SIGNING_SECRET || '';
+export const SLACK_2_NAMESPACE = process.env.SLACK_2_NAMESPACE || envConfig.SLACK_2_NAMESPACE || '';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -42,7 +59,7 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
-export const MAIN_GROUP_FOLDER = 'main';
+export const MAIN_GROUP_FOLDER = process.env.MAIN_GROUP_FOLDER || envConfig.MAIN_GROUP_FOLDER || 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
@@ -77,3 +94,14 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Email intake (forwarded email → bookmark pipeline)
+export const EMAIL_INTAKE_ENABLED =
+  (process.env.EMAIL_INTAKE_ENABLED || 'true') === 'true';
+export const EMAIL_INTAKE_POLL_INTERVAL = parseInt(
+  process.env.EMAIL_INTAKE_POLL_INTERVAL || '300000', 10); // 5 min
+export const EMAIL_INTAKE_ACCOUNT = 'jibot@ito.com';
+export const EMAIL_INTAKE_FROM_FILTER = 'joi@ito.com';
+export const GOG_BIN = '/opt/homebrew/bin/gog';
+export const GOG_KEYRING_PASSWORD = 'gogjibot';
+export const BOOKMARK_RELAY_URL = 'http://localhost:9999';

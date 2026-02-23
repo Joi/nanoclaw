@@ -39,8 +39,8 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
-  canSeeAllTasks?: boolean;
   remindersAccess?: boolean; // If true, group gets Apple Reminders tools
+  bookmarksAccess?: boolean; // If true, group gets bookmark extraction tools
 }
 
 export interface NewMessage {

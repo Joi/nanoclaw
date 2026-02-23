@@ -10,9 +10,10 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getRegisteredGroupsByFolder, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { processBookmarkIpc } from './bookmarks.js';
 import { processRemindersIpc } from './reminders.js';
 import { RegisteredGroup } from './types.js';
 
@@ -181,6 +182,43 @@ export function startIpcWatcher(deps: IpcDeps): void {
           'Error reading IPC reminders directory',
         );
       }
+
+      // Process bookmarks from this group's IPC directory
+      const bookmarksDir = path.join(ipcBaseDir, sourceGroup, 'bookmarks');
+      try {
+        if (fs.existsSync(bookmarksDir)) {
+          const bookmarkFiles = fs
+            .readdirSync(bookmarksDir)
+            .filter((f) => f.startsWith('req-') && f.endsWith('.json'));
+          for (const file of bookmarkFiles) {
+            const filePath = path.join(bookmarksDir, file);
+            try {
+              await processBookmarkIpc(filePath);
+              fs.unlinkSync(filePath);
+              logger.info(
+                { file, sourceGroup },
+                'IPC bookmark processed',
+              );
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC bookmark',
+              );
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-${file}`),
+              );
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC bookmarks directory',
+        );
+      }
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -201,13 +239,14 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
-    // For register_group
+    // For register_group / link_account
     jid?: string;
     name?: string;
     folder?: string;
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    targetFolder?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -415,6 +454,55 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'link_account':
+      // Only main group can link accounts
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized link_account attempt blocked',
+        );
+        break;
+      }
+      if (data.jid && data.targetFolder) {
+        if (!isValidGroupFolder(data.targetFolder)) {
+          logger.warn(
+            { sourceGroup, folder: data.targetFolder },
+            'Invalid link_account request - unsafe folder name',
+          );
+          break;
+        }
+        // Look up an existing group with this folder to copy privileges
+        const siblings = getRegisteredGroupsByFolder(data.targetFolder);
+        if (siblings.length === 0) {
+          logger.warn(
+            { targetFolder: data.targetFolder },
+            'link_account: no existing group with target folder',
+          );
+          break;
+        }
+        const template = siblings[0];
+        deps.registerGroup(data.jid, {
+          name: data.name || template.name,
+          folder: data.targetFolder,
+          trigger: template.trigger,
+          added_at: new Date().toISOString(),
+          containerConfig: template.containerConfig,
+          requiresTrigger: data.requiresTrigger ?? template.requiresTrigger,
+          remindersAccess: template.remindersAccess,
+          bookmarksAccess: template.bookmarksAccess,
+        });
+        logger.info(
+          { jid: data.jid, targetFolder: data.targetFolder },
+          'Account linked via IPC',
+        );
+      } else {
+        logger.warn(
+          { data },
+          'Invalid link_account request - missing jid or targetFolder',
         );
       }
       break;

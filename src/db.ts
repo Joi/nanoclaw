@@ -71,12 +71,13 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -120,13 +121,17 @@ function createSchema(database: Database.Database): void {
     /* columns already exist */
   }
 
-  // Add can_see_all_tasks column if it doesn't exist
+  // Drop can_see_all_tasks column if it exists (no longer used)
   try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN can_see_all_tasks INTEGER DEFAULT 0`,
-    );
+    const hasCol = database
+      .prepare(`SELECT COUNT(*) as cnt FROM pragma_table_info('registered_groups') WHERE name='can_see_all_tasks'`)
+      .get() as { cnt: number };
+    if (hasCol.cnt > 0) {
+      logger.info('Dropping unused can_see_all_tasks column from registered_groups');
+      database.exec(`ALTER TABLE registered_groups DROP COLUMN can_see_all_tasks`);
+    }
   } catch {
-    /* column already exists */
+    /* column doesn't exist or SQLite too old to DROP COLUMN — harmless either way */
   }
 
   // Add reminders_access column if it doesn't exist
@@ -137,6 +142,49 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  // Add bookmarks_access column if it doesn't exist
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN bookmarks_access INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Remove UNIQUE constraint on folder (SQLite can't ALTER CONSTRAINT, so recreate)
+  migrateRemoveFolderUnique(database);
+}
+
+function migrateRemoveFolderUnique(database: Database.Database): void {
+  // Check if the UNIQUE constraint still exists on folder
+  const tableInfo = database
+    .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'`)
+    .get() as { sql: string } | undefined;
+  if (!tableInfo || !tableInfo.sql.includes('UNIQUE')) return;
+
+  logger.info('Migrating registered_groups: removing UNIQUE constraint on folder');
+  database.exec(`
+    CREATE TABLE registered_groups_new (
+      jid TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      folder TEXT NOT NULL,
+      trigger_pattern TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      container_config TEXT,
+      requires_trigger INTEGER DEFAULT 1,
+      reminders_access INTEGER DEFAULT 0,
+      bookmarks_access INTEGER DEFAULT 0
+    );
+    INSERT INTO registered_groups_new SELECT
+      jid, name, folder, trigger_pattern, added_at, container_config,
+      requires_trigger, reminders_access, bookmarks_access
+    FROM registered_groups;
+    DROP TABLE registered_groups;
+    ALTER TABLE registered_groups_new RENAME TO registered_groups;
+    CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
+  `);
+  logger.info('Migration complete: folder UNIQUE constraint removed');
 }
 
 export function initDatabase(): void {
@@ -541,8 +589,8 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
-        can_see_all_tasks: number | null;
         reminders_access: number | null;
+        bookmarks_access: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -563,8 +611,8 @@ export function getRegisteredGroup(
       ? JSON.parse(row.container_config)
       : undefined,
     requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    canSeeAllTasks: row.can_see_all_tasks === 1,
     remindersAccess: row.reminders_access === 1,
+    bookmarksAccess: row.bookmarks_access === 1,
   };
 }
 
@@ -576,7 +624,7 @@ export function setRegisteredGroup(
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, can_see_all_tasks, reminders_access)
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
@@ -586,8 +634,8 @@ export function setRegisteredGroup(
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
-    group.canSeeAllTasks ? 1 : 0,
     group.remindersAccess ? 1 : 0,
+    group.bookmarksAccess ? 1 : 0,
   );
 }
 
@@ -604,6 +652,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     requires_trigger: number | null;
     can_see_all_tasks: number | null;
     reminders_access: number | null;
+    bookmarks_access: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -623,11 +672,46 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         ? JSON.parse(row.container_config)
         : undefined,
       requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      canSeeAllTasks: row.can_see_all_tasks === 1,
       remindersAccess: row.reminders_access === 1,
+      bookmarksAccess: row.bookmarks_access === 1,
     };
   }
   return result;
+}
+
+export function getRegisteredGroupsByFolder(
+  folder: string,
+): Array<{ jid: string } & RegisteredGroup> {
+  const rows = db
+    .prepare('SELECT * FROM registered_groups WHERE folder = ?')
+    .all(folder) as Array<{
+    jid: string;
+    name: string;
+    folder: string;
+    trigger_pattern: string;
+    added_at: string;
+    container_config: string | null;
+    requires_trigger: number | null;
+    can_see_all_tasks: number | null;
+    reminders_access: number | null;
+    bookmarks_access: number | null;
+  }>;
+  return rows
+    .filter((row) => isValidGroupFolder(row.folder))
+    .map((row) => ({
+      jid: row.jid,
+      name: row.name,
+      folder: row.folder,
+      trigger: row.trigger_pattern,
+      added_at: row.added_at,
+      containerConfig: row.container_config
+        ? JSON.parse(row.container_config)
+        : undefined,
+      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      canSeeAllTasks: row.can_see_all_tasks === 1,
+      remindersAccess: row.reminders_access === 1,
+      bookmarksAccess: row.bookmarks_access === 1,
+    }));
 }
 
 // --- JSON migration ---

@@ -28,6 +28,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   remindersAccess?: boolean;
+  bookmarksAccess?: boolean;
   secrets?: Record<string, string>;
 }
 
@@ -448,6 +449,7 @@ async function runQuery(
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             NANOCLAW_REMINDERS_ACCESS: containerInput.remindersAccess ? '1' : '0',
+            NANOCLAW_BOOKMARKS_ACCESS: containerInput.bookmarksAccess ? '1' : '0',
           },
         },
       },

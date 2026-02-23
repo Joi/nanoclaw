@@ -11,10 +11,18 @@ import {
   SIGNAL_CLI_URL,
   SIGNAL_DEFAULT_TIER,
   SIGNAL_ONLY,
+  SLACK_APP_TOKEN,
+  SLACK_BOT_TOKEN,
+  SLACK_SIGNING_SECRET,
+  SLACK_2_APP_TOKEN,
+  SLACK_2_BOT_TOKEN,
+  SLACK_2_NAMESPACE,
+  SLACK_2_SIGNING_SECRET,
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { SignalChannel } from './channels/signal.js';
+import { SlackChannel } from './channels/slack.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -41,6 +49,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { startEmailIntakeLoop } from './email-intake-scheduler.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -151,6 +160,52 @@ function autoRegisterSignalContact(chatJid: string, senderName: string): boolean
   logger.info(
     { chatJid, folder, template: SIGNAL_DEFAULT_TIER, senderName: displayName },
     'Auto-registered new Signal contact',
+  );
+  return true;
+}
+
+/**
+ * Auto-register a new Slack DM or channel.
+ * DMs use the Signal default tier template; channels get requiresTrigger: true.
+ */
+function autoRegisterSlackContact(chatJid: string, nameOrId: string, isGroup: boolean): boolean {
+  if (!SIGNAL_DEFAULT_TIER) return false;
+
+  const idPart = chatJid.replace(/^slack:(?:channel:)?/, '');
+  const folder = `slack-${idPart}`;
+  const displayName = nameOrId || idPart;
+
+  // Check template folder exists
+  const templateDir = path.join(GROUPS_DIR, SIGNAL_DEFAULT_TIER);
+  const templateClaudeMd = path.join(templateDir, 'CLAUDE.md');
+  if (!fs.existsSync(templateClaudeMd)) {
+    logger.warn(
+      { template: SIGNAL_DEFAULT_TIER, chatJid },
+      'Default tier template CLAUDE.md not found, skipping Slack auto-registration',
+    );
+    return false;
+  }
+
+  const group: RegisteredGroup = {
+    name: displayName,
+    folder,
+    trigger: `@${ASSISTANT_NAME}`,
+    added_at: new Date().toISOString(),
+    requiresTrigger: isGroup,
+  };
+
+  registerGroup(chatJid, group);
+
+  // Copy CLAUDE.md from template
+  const groupDir = path.join(GROUPS_DIR, folder);
+  const destClaudeMd = path.join(groupDir, 'CLAUDE.md');
+  if (!fs.existsSync(destClaudeMd)) {
+    fs.copyFileSync(templateClaudeMd, destClaudeMd);
+  }
+
+  logger.info(
+    { chatJid, folder, template: SIGNAL_DEFAULT_TIER, name: displayName, isGroup },
+    'Auto-registered new Slack contact',
   );
   return true;
 }
@@ -291,10 +346,9 @@ async function runAgent(
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
-  const canSeeAllTasks = isMain || !!group.canSeeAllTasks;
   writeTasksSnapshot(
     group.folder,
-    canSeeAllTasks,
+    isMain,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -341,6 +395,7 @@ async function runAgent(
         chatJid,
         isMain,
         remindersAccess: !!group.remindersAccess,
+        bookmarksAccess: !!group.bookmarksAccess,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -531,6 +586,45 @@ async function main(): Promise<void> {
     }
   }
 
+  // Slack channel (if configured)
+  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+    const slack = new SlackChannel({
+      ...channelOpts,
+      slackBotToken: SLACK_BOT_TOKEN,
+      slackAppToken: SLACK_APP_TOKEN,
+      slackSigningSecret: SLACK_SIGNING_SECRET,
+      onNewContact: SIGNAL_DEFAULT_TIER ? (chatJid, nameOrId, isGroup) => {
+        return autoRegisterSlackContact(chatJid, nameOrId, isGroup);
+      } : undefined,
+    });
+    channels.push(slack);
+    try {
+      await slack.connect();
+      logger.info('Slack channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Slack channel');
+    }
+  }
+
+  // Second Slack workspace (if configured)
+  if (SLACK_2_BOT_TOKEN && SLACK_2_APP_TOKEN && SLACK_2_NAMESPACE) {
+    const slack2 = new SlackChannel({
+      ...channelOpts,
+      slackBotToken: SLACK_2_BOT_TOKEN,
+      slackAppToken: SLACK_2_APP_TOKEN,
+      slackSigningSecret: SLACK_2_SIGNING_SECRET,
+      namespace: SLACK_2_NAMESPACE,
+      // No onNewContact — contacts linked manually via link_account
+    });
+    channels.push(slack2);
+    try {
+      await slack2.connect();
+      logger.info({ namespace: SLACK_2_NAMESPACE }, 'Slack 2 channel connected');
+    } catch (err) {
+      logger.error({ err, namespace: SLACK_2_NAMESPACE }, 'Failed to connect Slack 2 channel');
+    }
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -559,6 +653,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
+  startEmailIntakeLoop();
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

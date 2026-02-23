@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -36,6 +37,7 @@ export interface ContainerInput {
   assistantName?: string;
   secrets?: Record<string, string>;
   remindersAccess?: boolean;
+  bookmarksAccess?: boolean;
 }
 
 export interface ContainerOutput {
@@ -147,6 +149,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'reminders'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'bookmarks'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -166,6 +169,21 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Mount gog (Google CLI) binary + wrapper + config if available
+  const gogBin = path.join(projectRoot, '.bin', 'gog-linux');
+  const gogWrapper = path.join(projectRoot, 'scripts', 'gog-wrapper.sh');
+  const gogConfigDir = path.join(
+    process.env.HOME || os.homedir(),
+    'Library', 'Application Support', 'gogcli',
+  );
+  if (fs.existsSync(gogBin) && fs.existsSync(gogConfigDir)) {
+    mounts.push(
+      { hostPath: gogBin, containerPath: '/usr/local/bin/gog-linux', readonly: true },
+      { hostPath: gogWrapper, containerPath: '/usr/local/bin/gog', readonly: true },
+      { hostPath: gogConfigDir, containerPath: '/workspace/.config/gogcli', readonly: true },
+    );
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
