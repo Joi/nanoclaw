@@ -29,6 +29,7 @@ interface ContainerInput {
   assistantName?: string;
   remindersAccess?: boolean;
   bookmarksAccess?: boolean;
+  emailAccess?: boolean;
   secrets?: Record<string, string>;
 }
 
@@ -450,6 +451,7 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
             NANOCLAW_REMINDERS_ACCESS: containerInput.remindersAccess ? '1' : '0',
             NANOCLAW_BOOKMARKS_ACCESS: containerInput.bookmarksAccess ? '1' : '0',
+            NANOCLAW_EMAIL_ACCESS: containerInput.emailAccess ? '1' : '0',
           },
         },
       },

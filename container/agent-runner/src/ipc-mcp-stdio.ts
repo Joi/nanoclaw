@@ -577,6 +577,92 @@ Extraction can take 30-60 seconds. The result includes the file path, title, and
   );
 }
 
+// ── Email tools (conditional on NANOCLAW_EMAIL_ACCESS) ──
+
+const hasEmailAccess = process.env.NANOCLAW_EMAIL_ACCESS === '1';
+
+if (hasEmailAccess) {
+  const { execFileSync } = await import('child_process');
+  const EMAIL_ACCOUNT = 'jibot@ito.com';
+
+  server.tool(
+    'send_email',
+    `Send an email from ${EMAIL_ACCOUNT}. Always search contacts first if you only have a name (not an email address).`,
+    {
+      to: z.string().describe('Recipient email address'),
+      subject: z.string().describe('Email subject line'),
+      body: z.string().describe('Email body text'),
+      cc: z.string().optional().describe('CC email address(es), comma-separated'),
+      bcc: z.string().optional().describe('BCC email address(es), comma-separated'),
+    },
+    async (args) => {
+      try {
+        const cmdArgs = [
+          'gmail', 'send',
+          '--account', EMAIL_ACCOUNT,
+          '--to', args.to,
+          '--subject', args.subject,
+          '--body', args.body,
+          '--force', '--no-input',
+        ];
+        if (args.cc) {
+          cmdArgs.push('--cc', args.cc);
+        }
+        if (args.bcc) {
+          cmdArgs.push('--bcc', args.bcc);
+        }
+
+        const result = execFileSync('gog', cmdArgs, {
+          encoding: 'utf-8',
+          timeout: 30_000,
+        }).trim();
+
+        return {
+          content: [{ type: 'text' as const, text: `Email sent to ${args.to}.\n${result}` }],
+        };
+      } catch (err) {
+        const message = err instanceof Error ? (err as { stderr?: string }).stderr || err.message : String(err);
+        return {
+          content: [{ type: 'text' as const, text: `Failed to send email: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'search_contacts',
+    `Search Google Contacts for a person's name or email. Use this to find the correct email address before sending an email.`,
+    {
+      query: z.string().describe('Name or email to search for'),
+    },
+    async (args) => {
+      try {
+        const result = execFileSync(
+          'gog', ['contacts', 'search', args.query, '--account', EMAIL_ACCOUNT, '-j'],
+          { encoding: 'utf-8', timeout: 15_000 },
+        ).trim();
+
+        if (!result) {
+          return {
+            content: [{ type: 'text' as const, text: `No contacts found for "${args.query}".` }],
+          };
+        }
+
+        return {
+          content: [{ type: 'text' as const, text: result }],
+        };
+      } catch (err) {
+        const message = err instanceof Error ? (err as { stderr?: string }).stderr || err.message : String(err);
+        return {
+          content: [{ type: 'text' as const, text: `Failed to search contacts: ${message}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

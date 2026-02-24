@@ -19,6 +19,7 @@ import {
   SLACK_2_NAMESPACE,
   SLACK_2_SIGNING_SECRET,
   TRIGGER_PATTERN,
+  VOICE_API_TOKEN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { SignalChannel } from './channels/signal.js';
@@ -54,6 +55,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { writeRemindersSnapshot } from './reminders.js';
+import { startVoiceApi } from './voice-api.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -332,6 +334,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  // Guard against silent failures: if the agent "succeeded" but never sent
+  // any visible output, the user didn't get a response. Roll back the cursor
+  // so the messages will be re-processed on the next trigger.
+  if (!outputSentToUser) {
+    lastAgentTimestamp[chatJid] = previousCursor;
+    saveState();
+    logger.warn({ group: group.name }, 'Agent completed with no visible output, rolled back cursor');
+    return true; // Don't retry immediately — avoid tight loops on persistent silent failures
+  }
+
   return true;
 }
 
@@ -396,6 +408,7 @@ async function runAgent(
         isMain,
         remindersAccess: !!group.remindersAccess,
         bookmarksAccess: !!group.bookmarksAccess,
+        emailAccess: !!group.emailAccess,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -654,6 +667,12 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   startEmailIntakeLoop();
+
+  // Voice API (HTTP endpoint for iOS voice bridge)
+  if (VOICE_API_TOKEN) {
+    startVoiceApi();
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

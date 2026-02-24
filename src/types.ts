@@ -41,6 +41,7 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
   remindersAccess?: boolean; // If true, group gets Apple Reminders tools
   bookmarksAccess?: boolean; // If true, group gets bookmark extraction tools
+  emailAccess?: boolean; // If true, group gets email send/contacts tools
 }
 
 export interface NewMessage {

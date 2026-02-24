@@ -38,6 +38,7 @@ export interface ContainerInput {
   secrets?: Record<string, string>;
   remindersAccess?: boolean;
   bookmarksAccess?: boolean;
+  emailAccess?: boolean;
 }
 
 export interface ContainerOutput {
@@ -185,6 +186,16 @@ function buildVolumeMounts(
     );
   }
 
+  // Mount meeting-prep script if available
+  const meetingPrepScript = path.join(projectRoot, 'scripts', 'meeting-prep.sh');
+  if (fs.existsSync(meetingPrepScript)) {
+    mounts.push({
+      hostPath: meetingPrepScript,
+      containerPath: '/usr/local/bin/meeting-prep',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -211,6 +222,15 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass meeting-prep sprite credentials (read from .env, never mounted as files)
+  const meetingPrepEnv = readEnvFile(['MEETING_PREP_URL', 'MEETING_PREP_TOKEN']);
+  if (meetingPrepEnv.MEETING_PREP_URL) {
+    args.push('-e', `MEETING_PREP_URL=${meetingPrepEnv.MEETING_PREP_URL}`);
+  }
+  if (meetingPrepEnv.MEETING_PREP_TOKEN) {
+    args.push('-e', `MEETING_PREP_TOKEN=${meetingPrepEnv.MEETING_PREP_TOKEN}`);
+  }
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),

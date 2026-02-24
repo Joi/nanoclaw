@@ -21,6 +21,8 @@ const envConfig = readEnvFile([
   'SLACK_2_SIGNING_SECRET',
   'SLACK_2_NAMESPACE',
   'MAIN_GROUP_FOLDER',
+  'VOICE_API_PORT',
+  'VOICE_API_TOKEN',
 ]);
 
 export const ASSISTANT_NAME =
@@ -73,9 +75,9 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
 ); // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(
-  process.env.IDLE_TIMEOUT || '1800000',
+  process.env.IDLE_TIMEOUT || '300000',
   10,
-); // 30min default — how long to keep container alive after last result
+); // 5min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
@@ -105,3 +107,9 @@ export const EMAIL_INTAKE_FROM_FILTER = 'joi@ito.com';
 export const GOG_BIN = '/opt/homebrew/bin/gog';
 export const GOG_KEYRING_PASSWORD = 'gogjibot';
 export const BOOKMARK_RELAY_URL = 'http://localhost:9999';
+
+// Voice API (HTTP endpoint for iOS voice bridge)
+export const VOICE_API_PORT = parseInt(
+  process.env.VOICE_API_PORT || envConfig.VOICE_API_PORT || '3200', 10);
+export const VOICE_API_TOKEN =
+  process.env.VOICE_API_TOKEN || envConfig.VOICE_API_TOKEN || '';
