@@ -1,4 +1,3 @@
-import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
@@ -20,6 +19,8 @@ const envConfig = readEnvFile([
   'SLACK_2_APP_TOKEN',
   'SLACK_2_SIGNING_SECRET',
   'SLACK_2_NAMESPACE',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
   'MAIN_GROUP_FOLDER',
   'VOICE_API_PORT',
   'VOICE_API_TOKEN',
@@ -49,7 +50,7 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
-const HOME_DIR = process.env.HOME || os.homedir();
+const HOME_DIR = process.env.HOME || '/Users/user';
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
@@ -113,3 +114,9 @@ export const VOICE_API_PORT = parseInt(
   process.env.VOICE_API_PORT || envConfig.VOICE_API_PORT || '3200', 10);
 export const VOICE_API_TOKEN =
   process.env.VOICE_API_TOKEN || envConfig.VOICE_API_TOKEN || '';
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';

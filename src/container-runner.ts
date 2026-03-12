@@ -122,6 +122,8 @@ function buildVolumeMounts(
         // Enable Claude's memory feature (persists user preferences between sessions)
         // https://code.claude.com/docs/en/memory#manage-auto-memory
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+        // iblai-router: route API calls through cost-optimizing proxy
+        ANTHROPIC_BASE_URL: 'http://host.docker.internal:8402',
       },
     }, null, 2) + '\n');
   }

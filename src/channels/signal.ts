@@ -1,3 +1,7 @@
+import fs from 'fs';
+import path from 'path';
+
+import { resolveGroupIpcPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
 
@@ -24,6 +28,13 @@ interface JsonRpcResponse<T = unknown> {
   id: number;
 }
 
+interface SignalAttachment {
+  contentType: string;
+  filename?: string;
+  id: string;
+  size?: number;
+}
+
 interface SignalReceiveEntry {
   envelope: {
     source?: string;
@@ -37,6 +48,7 @@ interface SignalReceiveEntry {
         groupId: string;
         type: string;
       };
+      attachments?: SignalAttachment[];
     };
     syncMessage?: {
       sentMessage?: {
@@ -47,6 +59,7 @@ interface SignalReceiveEntry {
           groupId: string;
           type: string;
         };
+        attachments?: SignalAttachment[];
       };
     };
   };
@@ -182,50 +195,54 @@ export class SignalChannel implements Channel {
       if (!entries || entries.length === 0) return;
 
       for (const entry of entries) {
-        this.handleEntry(entry);
+        await this.handleEntry(entry);
       }
     } finally {
       this.polling = false;
     }
   }
 
-  private handleEntry(entry: SignalReceiveEntry): void {
+  private async handleEntry(entry: SignalReceiveEntry): Promise<void> {
     const { envelope } = entry;
     if (!envelope) return;
 
-    // Handle direct data messages
-    if (envelope.dataMessage?.message) {
-      this.processInbound({
+    // Handle direct data messages (text, attachments, or both)
+    const dm = envelope.dataMessage;
+    if (dm?.message || dm?.attachments?.length) {
+      await this.processInbound({
         source: envelope.source || envelope.sourceNumber || '',
         sourceName: envelope.sourceName,
-        message: envelope.dataMessage.message,
-        timestamp: envelope.dataMessage.timestamp || envelope.timestamp || Date.now(),
-        groupId: envelope.dataMessage.groupInfo?.groupId,
+        message: dm.message || '',
+        timestamp: dm.timestamp || envelope.timestamp || Date.now(),
+        groupId: dm.groupInfo?.groupId,
+        attachments: dm.attachments,
       });
     }
 
     // Handle sync messages (sent from another device)
-    if (envelope.syncMessage?.sentMessage?.message) {
-      const sent = envelope.syncMessage.sentMessage;
-      this.processInbound({
+    const sent = envelope.syncMessage?.sentMessage;
+    if (sent?.message || sent?.attachments?.length) {
+      await this.processInbound({
         source: this.account, // sent by us
         sourceName: undefined,
-        message: sent.message!,
+        message: sent.message || '',
         timestamp: sent.timestamp || envelope.timestamp || Date.now(),
         groupId: sent.groupInfo?.groupId,
         isFromMe: true,
+        attachments: sent.attachments,
       });
     }
   }
 
-  private processInbound(msg: {
+  private async processInbound(msg: {
     source: string;
     sourceName?: string;
     message: string;
     timestamp: number;
     groupId?: string;
     isFromMe?: boolean;
-  }): void {
+    attachments?: SignalAttachment[];
+  }): Promise<void> {
     const isGroup = !!msg.groupId;
     const chatJid = isGroup
       ? `sig:group:${msg.groupId}`
@@ -248,18 +265,73 @@ export class SignalChannel implements Channel {
         groups = this.opts.registeredGroups();
       }
     }
+
+    let content = msg.message;
+
+    // Download and stage attachments for registered groups
+    if (groups[chatJid] && msg.attachments?.length) {
+      const group = groups[chatJid];
+      for (const att of msg.attachments) {
+        try {
+          const data = await this.downloadAttachment(att.id);
+          if (data && data.length > 0) {
+            const ipcPath = resolveGroupIpcPath(group.folder);
+            const inputDir = path.join(ipcPath, 'input');
+            fs.mkdirSync(inputDir, { recursive: true });
+            const ext = att.filename ? '' : mimeToExt(att.contentType);
+            const originalName = att.filename || `attachment${ext}`;
+            const safeName = `${Date.now()}-${originalName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+            fs.writeFileSync(path.join(inputDir, safeName), data);
+
+            const annotation = `[Attached: ${originalName} (${att.contentType}, ${formatSize(data.length)}) — saved to /workspace/ipc/input/${safeName}]`;
+            content = content ? `${content}\n${annotation}` : annotation;
+            logger.info(
+              { chatJid, filename: safeName, size: data.length, contentType: att.contentType },
+              'Signal attachment saved',
+            );
+          }
+        } catch (err) {
+          logger.warn({ chatJid, attachmentId: att.id, err }, 'Failed to download Signal attachment');
+          const annotation = `[Attached: ${att.filename || 'file'} (${att.contentType}) — download failed]`;
+          content = content ? `${content}\n${annotation}` : annotation;
+        }
+      }
+    }
+
+    // Skip if no content (no text AND no attachment annotations)
+    if (!content) return;
+
     if (groups[chatJid]) {
       const newMsg: NewMessage = {
         id: msgId,
         chat_jid: chatJid,
         sender: msg.source,
         sender_name: senderName,
-        content: msg.message,
+        content,
         timestamp,
         is_from_me: isFromMe,
         is_bot_message: isFromMe,
       };
       this.opts.onMessage(chatJid, newMsg);
+    }
+  }
+
+  private async downloadAttachment(attachmentId: string): Promise<Buffer | null> {
+    // signal-cli native daemon stores attachments on disk (no REST endpoint)
+    const attachmentsDir = path.join(
+      process.env.HOME || require('os').homedir(),
+      '.local', 'share', 'signal-cli', 'attachments',
+    );
+    const filePath = path.join(attachmentsDir, attachmentId);
+    try {
+      if (fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath);
+      }
+      logger.warn({ attachmentId, filePath }, 'Signal attachment file not found on disk');
+      return null;
+    } catch (err) {
+      logger.warn({ err, attachmentId }, 'Attachment read failed');
+      return null;
     }
   }
 
@@ -307,4 +379,25 @@ export class SignalChannel implements Channel {
       this.flushing = false;
     }
   }
+}
+
+// --- Helpers ---
+
+function mimeToExt(contentType: string): string {
+  const map: Record<string, string> = {
+    'application/pdf': '.pdf',
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/heic': '.heic',
+    'text/plain': '.txt',
+  };
+  return map[contentType] || '';
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
