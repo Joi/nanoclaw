@@ -77,6 +77,9 @@ export class SignalChannel implements Channel {
   private flushing = false;
   private polling = false;
   private rpcId = 0;
+  private pollCount = 0;
+  private consecutiveEmpty = 0;
+  private lastReceiveAt = 0;
 
   constructor(opts: SignalChannelOpts) {
     this.opts = opts;
@@ -177,7 +180,7 @@ export class SignalChannel implements Channel {
       }
       return body.result ?? null;
     } catch (err) {
-      logger.debug({ err, method }, 'JSON-RPC fetch failed');
+      logger.warn({ err, method, timeoutMs }, 'JSON-RPC fetch failed');
       return null;
     }
   }
@@ -185,14 +188,39 @@ export class SignalChannel implements Channel {
   // --- Polling ---
 
   private async poll(): Promise<void> {
-    if (this.polling) return;
+    if (this.polling) {
+      logger.debug('Signal poll skipped (previous still running)');
+      return;
+    }
     this.polling = true;
+    this.pollCount++;
     try {
       const entries = await this.rpc<SignalReceiveEntry[]>('receive', {
         timeout: RECEIVE_TIMEOUT_S,
       }, RECEIVE_FETCH_TIMEOUT_MS);
 
-      if (!entries || entries.length === 0) return;
+      if (!entries || entries.length === 0) {
+        this.consecutiveEmpty++;
+        // Heartbeat every 20 polls (~60s) when idle
+        if (this.pollCount % 20 === 0) {
+          logger.info(
+            { pollCount: this.pollCount, consecutiveEmpty: this.consecutiveEmpty },
+            'Signal poll heartbeat (no messages)',
+          );
+        }
+        // Warn if no messages for 2+ minutes — signal-cli may be disconnected upstream
+        if (this.consecutiveEmpty === 40) {
+          logger.warn(
+            { consecutiveEmpty: this.consecutiveEmpty, pollCount: this.pollCount },
+            'Signal: no messages received for 2+ minutes — signal-cli may be disconnected from Signal servers. Check: lsof -i -n -P -a -p $(pgrep -f signal-cli) | grep 443',
+          );
+        }
+        return;
+      }
+
+      this.consecutiveEmpty = 0;
+      this.lastReceiveAt = Date.now();
+      logger.info({ count: entries.length }, 'Signal: received messages');
 
       for (const entry of entries) {
         await this.handleEntry(entry);
