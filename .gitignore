@@ -33,3 +33,12 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Nested repos
+router/
+
+# Python
+__pycache__/
+
+# Telegram session
+scripts/telegram-relay/relay.session
