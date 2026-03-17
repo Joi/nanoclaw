@@ -16,7 +16,7 @@ Calls a remote sprite that searches **joi@ito.com Gmail** (last 30 days) for mee
 
 ```bash
 # Pipe gog calendar output directly
-gog calendar events joi@ito.com -a jibot@ito.com --today --json | meeting-prep
+gog calendar events joi@ito.com -a jibot@ito.com --today --max 25 --json | meeting-prep
 
 # Or pass specific meetings
 echo '{"meetings":[{"title":"Board Meeting","start":"2026-02-25T10:00:00+09:00","attendees":["ceo@example.com"],"description":"Quarterly review"}]}' | meeting-prep
@@ -33,7 +33,7 @@ Use gog for **calendar access** (via jibot@ito.com delegated access to joi@ito.c
 
 ```bash
 # Calendar (joi@ito.com via jibot@ito.com delegation)
-gog calendar events joi@ito.com -a jibot@ito.com --today --json
+gog calendar events joi@ito.com -a jibot@ito.com --today --max 25 --json
 gog calendar event joi@ito.com <eventId> -a jibot@ito.com --json
 
 # jibot@ito.com email (for jibot's own correspondence)
@@ -48,10 +48,10 @@ gog gmail list --account jibot@ito.com --query "from:<email>" --max 5
 
 ```bash
 # Today's meetings
-gog calendar events joi@ito.com -a jibot@ito.com --today --json
+gog calendar events joi@ito.com -a jibot@ito.com --today --max 25 --json
 
 # Tomorrow's meetings
-gog calendar events joi@ito.com -a jibot@ito.com --tomorrow --json
+gog calendar events joi@ito.com -a jibot@ito.com --tomorrow --max 25 --json
 ```
 
 The user may ask for a specific day or range — adjust flags accordingly (`--from`, `--to`, `--days`).
@@ -61,7 +61,7 @@ The user may ask for a specific day or range — adjust flags accordingly (`--fr
 Pipe the calendar events to `meeting-prep` for joi@ito.com email context:
 
 ```bash
-gog calendar events joi@ito.com -a jibot@ito.com --today --json | meeting-prep
+gog calendar events joi@ito.com -a jibot@ito.com --today --max 25 --json | meeting-prep
 ```
 
 This returns a markdown document with email context, talking points, and action items for each meeting. Use this as the primary source of email context.
