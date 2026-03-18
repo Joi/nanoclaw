@@ -9,6 +9,10 @@
  *             API key via /api/oauth/claude_cli/create_api_key.
  *             Proxy injects real OAuth token on that exchange request;
  *             subsequent requests carry the temp key which is valid as-is.
+ *
+ * Meeting-prep proxy:
+ *   Requests to /meeting-prep/* are forwarded to the sprite with Bearer
+ *   token injected. Containers never see MEETING_PREP_TOKEN.
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
@@ -32,6 +36,8 @@ export function startCredentialProxy(
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
+    'MEETING_PREP_URL',
+    'MEETING_PREP_TOKEN',
   ]);
 
   const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
@@ -50,6 +56,56 @@ export function startCredentialProxy(
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
         const body = Buffer.concat(chunks);
+
+        // --- Meeting-prep proxy route ---
+        // Requests to /meeting-prep/* or /health (when via meeting-prep base URL)
+        // are forwarded to the sprite with Bearer token injected.
+        // This keeps MEETING_PREP_TOKEN out of containers entirely.
+        if (req.url?.startsWith('/meeting-prep') && secrets.MEETING_PREP_URL) {
+          const spriteUrl = new URL(secrets.MEETING_PREP_URL);
+          const spritePath = req.url;
+          const spriteIsHttps = spriteUrl.protocol === 'https:';
+          const spriteRequest = spriteIsHttps ? httpsRequest : httpRequest;
+
+          const spriteHeaders: Record<string, string | number> = {
+            'content-type': (req.headers['content-type'] as string) || 'application/json',
+            'content-length': body.length,
+          };
+          if (secrets.MEETING_PREP_TOKEN) {
+            spriteHeaders['authorization'] = `Bearer ${secrets.MEETING_PREP_TOKEN}`;
+          }
+
+          const spriteUpstream = spriteRequest(
+            {
+              hostname: spriteUrl.hostname,
+              port: spriteUrl.port || (spriteIsHttps ? 443 : 80),
+              path: spritePath,
+              method: req.method,
+              headers: spriteHeaders,
+            } as RequestOptions,
+            (upRes) => {
+              res.writeHead(upRes.statusCode!, upRes.headers);
+              upRes.pipe(res);
+            },
+          );
+
+          spriteUpstream.on('error', (err) => {
+            logger.error(
+              { err, url: req.url },
+              'Meeting-prep proxy upstream error',
+            );
+            if (!res.headersSent) {
+              res.writeHead(502);
+              res.end('Bad Gateway');
+            }
+          });
+
+          spriteUpstream.write(body);
+          spriteUpstream.end();
+          return;
+        }
+
+        // --- Anthropic API proxy (default route) ---
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),

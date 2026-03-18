@@ -10,8 +10,7 @@
 #   meeting-prep /path/to/meetings.json
 #
 # Env vars (set by container runner):
-#   MEETING_PREP_URL   — sprite base URL
-#   MEETING_PREP_TOKEN — bearer token
+#   MEETING_PREP_URL   — credential proxy URL (Bearer token injected by proxy)
 
 set -euo pipefail
 
@@ -19,15 +18,15 @@ BATCH_SIZE=4
 MAX_RETRIES=3
 RETRY_DELAY=5
 
-if [ -z "${MEETING_PREP_URL:-}" ] || [ -z "${MEETING_PREP_TOKEN:-}" ]; then
-    echo "Error: MEETING_PREP_URL and MEETING_PREP_TOKEN must be set" >&2
+if [ -z "${MEETING_PREP_URL:-}" ]; then
+    echo "Error: MEETING_PREP_URL must be set" >&2
     exit 1
 fi
 
 # --- Warm up the sprite (Fly.io VMs auto-stop when idle) ---
 echo "Warming up sprite..." >&2
 for i in 1 2 3; do
-    warmup_code=$(curl -s --max-time 30 -o /dev/null -w '%{http_code}' "${MEETING_PREP_URL}/health" 2>/dev/null || echo "000")
+    warmup_code=$(curl -s --max-time 30 -o /dev/null -w '%{http_code}' "${MEETING_PREP_URL}/meeting-prep/health" 2>/dev/null || echo "000")
     if [ "$warmup_code" = "200" ]; then
         echo "Sprite ready." >&2
         break
@@ -106,7 +105,6 @@ call_sprite() {
 
         response=$(curl -s --max-time 120 -w '\n%{http_code}' \
             -X POST "${MEETING_PREP_URL}/meeting-prep" \
-            -H "Authorization: Bearer ${MEETING_PREP_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "$body")
 

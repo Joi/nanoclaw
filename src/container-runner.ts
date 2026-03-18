@@ -274,14 +274,11 @@ function buildContainerArgs(
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
-  // Pass meeting-prep sprite credentials (read from .env, never mounted as files)
-  const meetingPrepEnv = readEnvFile(['MEETING_PREP_URL', 'MEETING_PREP_TOKEN']);
-  if (meetingPrepEnv.MEETING_PREP_URL) {
-    args.push('-e', `MEETING_PREP_URL=${meetingPrepEnv.MEETING_PREP_URL}`);
-  }
-  if (meetingPrepEnv.MEETING_PREP_TOKEN) {
-    args.push('-e', `MEETING_PREP_TOKEN=${meetingPrepEnv.MEETING_PREP_TOKEN}`);
-  }
+  // Meeting-prep: container calls the credential proxy, which injects the real
+  // Bearer token. Container never sees MEETING_PREP_TOKEN directly.
+  // MEETING_PREP_URL in .env is the real sprite URL (read by credential-proxy.ts).
+  // Container gets the proxy base URL instead.
+  args.push('-e', 'MEETING_PREP_URL=http://host.docker.internal:3001');
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -293,6 +290,16 @@ function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
+
+  // --- Container security hardening ---
+  // Drop ALL Linux capabilities (agents need none)
+  args.push('--cap-drop=ALL');
+  // Prevent privilege escalation via setuid/setgid binaries
+  args.push('--security-opt=no-new-privileges:true');
+  // Limit processes to prevent fork bombs
+  args.push('--pids-limit=256');
+  // Memory limit (2GB should be plenty for Claude Code agent work)
+  args.push('--memory=2g');
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
