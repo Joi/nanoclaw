@@ -251,9 +251,15 @@ export class EmailChannel implements Channel {
 
     // Classify based on the newest message (last in array)
     const newest = parsed[parsed.length - 1];
-    const classification = this.classifyEmail(newest.body);
     const latestMessage = messages[messages.length - 1];
     const subject = newest.subject || thread.subject || '(no subject)';
+    let classification = this.classifyEmail(newest.body);
+    // Override: if subject contains a #ws: tag, force agent classification
+    // so workstream-tagged emails always reach the jibrain intake hook
+    if (classification === 'bookmark' && /#ws:[a-z0-9_:-]+/i.test(subject)) {
+      classification = 'agent';
+      logger.info({ threadId: thread.id, subject }, 'Email channel: ws: tag in subject, forcing agent classification');
+    }
 
     logger.info(
       { threadId: thread.id, subject, classification, messageCount: messages.length },
@@ -263,9 +269,12 @@ export class EmailChannel implements Channel {
     if (classification === 'bookmark') {
       // URL-only: extract and bookmark
       const urls = extractUrls(newest.body);
+      // Extract ws: tag from subject for relay passthrough to bookmark-relay
+      const wsMatch = subject.match(/#(ws:[a-z0-9_:-]+)/i);
+      const relayTags = wsMatch ? [wsMatch[1]] : [];
       let relayFailed = false;
       for (const url of urls) {
-        const ok = await bookmarkViaRelay(url);
+        const ok = await bookmarkViaRelay(url, relayTags);
         if (!ok) {
           relayFailed = true;
           break;
@@ -519,12 +528,12 @@ function extractBodyText(detail: GogMessageDetail): string {
   return detail.snippet || '';
 }
 
-async function bookmarkViaRelay(url: string): Promise<boolean> {
+async function bookmarkViaRelay(url: string, tags?: string[]): Promise<boolean> {
   try {
     const resp = await fetch(`${BOOKMARK_RELAY_URL}/intake`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, hint: 'reference' }),
+      body: JSON.stringify({ url, hint: "reference", ...(tags && tags.length > 0 ? { tags } : {}) }),
       signal: AbortSignal.timeout(RELAY_TIMEOUT),
     });
     const result = (await resp.json()) as Record<string, unknown>;

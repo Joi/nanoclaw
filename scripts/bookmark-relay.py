@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Lightweight HTTP relay: sandbox -> sprite bookmark-extractor.
+"""Lightweight HTTP relay: sandbox -> knowledge-intake sprite.
 
-Listens on port 9999, forwards requests to the bookmark-extractor sprite
-via `sprite exec`. After extraction, pulls the file back to ~/jibrain/intake/
-which Syncthing distributes to all machines.
+Listens on port 9999, forwards URL extraction requests to the knowledge-intake
+sprite via its external API. After extraction, pulls the file back to
+~/jibrain/intake/ which Syncthing distributes to all machines.
 
-v2: Added /intake/structured for Ethoswarm Minds and /search for read-back.
+v3: Switched from sprite exec (unreliable websocket) to external HTTP API.
+    Still uses sprite exec as fallback for file pull-back.
 """
 
 import http.server
@@ -17,17 +18,51 @@ import re as regex
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
+from urllib.request import Request, urlopen
+from urllib.error import URLError, HTTPError
 
 PORT = 9999
 SPRITE_ORG = "joi-ito"
-SPRITE_NAME = "bookmark-extractor"
+SPRITE_NAME = "knowledge-intake"
 SPRITE_BIN = os.path.expanduser("~/.local/bin/sprite")
 JIBRAIN_EXTRACTIONS = Path.home() / "jibrain" / "intake"
 JIBRAIN_ROOT = Path.home() / "jibrain"
 SWITCHBOARD_KNOWLEDGE = Path.home() / "switchboard-knowledge"
 
+# External API for knowledge-intake sprite
+INTAKE_API_URL = "https://knowledge-intake-bmal2.sprites.app"
+API_KEY_PATH = Path.home() / ".config" / "knowledge-intake" / "api-key"
+
+
+def _load_api_key() -> str:
+    """Load API key from local config file."""
+    if API_KEY_PATH.exists():
+        return API_KEY_PATH.read_text().strip()
+    raise RuntimeError(f"API key not found at {API_KEY_PATH}")
+
+
+def api_request(endpoint: str, method: str = "GET", data: dict | None = None, timeout: int = 120) -> dict:
+    """Make an authenticated request to the knowledge-intake API."""
+    api_key = _load_api_key()
+    url = f"{INTAKE_API_URL}{endpoint}"
+    headers = {
+        "X-API-Key": api_key,
+        "Content-Type": "application/json",
+    }
+    body = json.dumps(data).encode() if data else None
+    req = Request(url, data=body, headers=headers, method=method)
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        raise RuntimeError(f"API error {e.code}: {error_body}")
+    except URLError as e:
+        raise RuntimeError(f"API connection error: {e.reason}")
+
 
 def sprite_exec(cmd: str, timeout: int = 120) -> str:
+    """Run a command inside the sprite via sprite exec (fallback for file ops)."""
     result = subprocess.run(
         [SPRITE_BIN, "-o", SPRITE_ORG, "-s", SPRITE_NAME, "exec", "bash", "-c", cmd],
         capture_output=True, text=True, timeout=timeout
@@ -45,9 +80,10 @@ def sprite_exec(cmd: str, timeout: int = 120) -> str:
 
 
 def sprite_cat(remote_path: str, timeout: int = 30) -> str:
+    """Read a file from inside the sprite (fallback)."""
     result = subprocess.run(
-        [SPRITE_BIN, "-o", SPRITE_ORG, "-s", SPRITE_NAME, "exec",
-         "cat", remote_path],
+        [SPRITE_BIN, "-o", SPRITE_ORG, "-s", SPRITE_NAME, "exec", "bash", "-c",
+         f"cat {remote_path}"],
         capture_output=True, text=True, timeout=timeout
     )
     if result.returncode != 0:
@@ -55,11 +91,54 @@ def sprite_cat(remote_path: str, timeout: int = 30) -> str:
     return result.stdout
 
 
-def pull_extraction(file_path: str):
+def inject_frontmatter_tags(content: str, extra_tags: list[str]) -> str:
+    """Inject extra tags into a markdown file YAML frontmatter.
+
+    For ws: tags, also injects workstream/thread/confidential fields
+    so jibrain-triage routes them to confidential workstreams.
+    """
+    if not extra_tags or "---" not in content:
+        return content
+
+    parts = content.split("---", 2)
+    if len(parts) < 3:
+        return content
+    fm_text = parts[1]
+    body = parts[2]
+
+    for tag in extra_tags:
+        if tag not in fm_text:
+            if "tags:" in fm_text:
+                fm_text = fm_text.replace("tags: [", f"tags: [{tag}, ", 1)
+            else:
+                fm_text = fm_text.rstrip() + f"\ntags: [{tag}]\n"
+
+        # For ws: tags, inject workstream/thread/confidential fields
+        if tag.startswith("ws:"):
+            ws_parts = tag[3:].split(":", 1)
+            ws_root = ws_parts[0]
+            thread = ws_parts[1] if len(ws_parts) > 1 else None
+            if "workstream:" not in fm_text:
+                fm_text = fm_text.rstrip() + f"\nworkstream: {ws_root}\n"
+            if thread and "thread:" not in fm_text:
+                fm_text = fm_text.rstrip() + f"\nthread: {thread}\n"
+            if "confidential:" not in fm_text:
+                fm_text = fm_text.rstrip() + "\nconfidential: true\n"
+
+    return f"---{fm_text}---{body}"
+
+
+def pull_extraction(file_path: str, extra_tags: list[str] | None = None):
     """Pull extraction file from sprite to local jibrain."""
     filename = Path(file_path).name
     remote_path = f"/home/sprite/vault/{file_path}"
     content = sprite_cat(remote_path)
+
+    # Inject extra tags (e.g., ws:medtech:hbot) into frontmatter
+    if extra_tags:
+        content = inject_frontmatter_tags(content, extra_tags)
+        print(f"[relay] Injected tags {extra_tags} into {filename}", flush=True)
+
     local_path = JIBRAIN_EXTRACTIONS / filename
     local_path.write_text(content, encoding="utf-8")
     print(f"[relay] Pulled {filename} -> {local_path} ({len(content)} bytes)", flush=True)
@@ -241,24 +320,25 @@ class RelayHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         try:
             if self.path == "/health":
-                out = sprite_exec("curl -s http://localhost:8080/health")
-                self._respond(200, json.loads(out))
+                result = api_request("/health")
+                self._respond(200, result)
             elif self.path == "/recent":
-                out = sprite_exec("curl -s http://localhost:8080/recent")
-                self._respond(200, json.loads(out))
+                result = api_request("/recent")
+                self._respond(200, result)
             elif self.path == "/relay-health":
                 self._respond(200, {
                     "status": "ok", "relay": "bookmark-relay", "port": PORT,
-                    "version": "2.0",
+                    "version": "3.0",
                     "endpoints": [
-                        "POST /intake (URL bookmark extraction)",
+                        "POST /intake (URL bookmark extraction via API)",
                         "POST /intake/structured (Ethoswarm/agent structured payloads)",
                         "GET /search?q=... (vault text search)",
                         "GET /intake/schema (endpoint schema docs)",
-        "GET /doc?path=... (read full document)",
-        "GET /tag?t=... (list files by tag)",
+                        "GET /doc?path=... (read full document)",
+                        "GET /tag?t=... (list files by tag)",
                     ],
                     "jibrain_extractions": str(JIBRAIN_EXTRACTIONS),
+                    "api_url": INTAKE_API_URL,
                 })
             elif self.path.startswith("/search"):
                 parsed = urlparse(self.path)
@@ -383,20 +463,43 @@ class RelayHandler(http.server.BaseHTTPRequestHandler):
                 if "url" not in payload:
                     self._respond(400, {"error": "missing url field"})
                     return
-                b64 = base64.b64encode(body.encode()).decode()
-                cmd = f"echo {b64} | base64 -d | curl -s -X POST http://localhost:8080/intake -H 'Content-Type: application/json' -d @-"
-                out = sprite_exec(cmd)
-                result = json.loads(out)
 
-                # Pull file back to jibrain
+                # Call knowledge-intake external API directly (no sprite exec)
+                api_payload = {"url": payload["url"]}
+                if "hint" in payload:
+                    api_payload["hint"] = payload["hint"]
+                if "domain" in payload:
+                    api_payload["domain"] = payload["domain"]
+
+                print(f"[relay] Calling knowledge-intake API for: {payload['url']}", flush=True)
+                result = api_request("/intake", method="POST", data=api_payload)
+
+                # Pull file back to jibrain (best-effort via sprite exec)
                 if result.get("status") == "created" and result.get("file_path"):
                     try:
-                        pull_extraction(result["file_path"])
+                        extra_tags = payload.get("tags", [])
+                        pull_extraction(result["file_path"], extra_tags=extra_tags)
                         result["synced_to_jibrain"] = True
                     except Exception as e:
-                        print(f"[relay] Pull-back failed: {e}", flush=True)
+                        print(f"[relay] Pull-back failed (file will arrive via Syncthing): {e}", flush=True)
                         result["synced_to_jibrain"] = False
-                        result["sync_error"] = str(e)
+                        result["sync_note"] = "file will arrive via Syncthing to macazbd"
+
+                        # If there were tags but pull-back failed, write a pending-tags sidecar
+                        extra_tags = payload.get("tags", [])
+                        if extra_tags and result.get("file_path"):
+                            try:
+                                stem = Path(result["file_path"]).stem
+                                tags_dir = JIBRAIN_EXTRACTIONS / ".pending-tags"
+                                tags_dir.mkdir(parents=True, exist_ok=True)
+                                sidecar = {"tags": extra_tags, "file_stem": stem,
+                                           "created": datetime.now().isoformat()}
+                                (tags_dir / f"{stem}.json").write_text(
+                                    json.dumps(sidecar), encoding="utf-8")
+                                print(f"[relay] Wrote pending-tags sidecar for {stem}", flush=True)
+                                result["pending_tags"] = extra_tags
+                            except Exception as te:
+                                print(f"[relay] Failed to write tag sidecar: {te}", flush=True)
 
                 self._respond(200, result)
 
@@ -418,7 +521,8 @@ class RelayHandler(http.server.BaseHTTPRequestHandler):
 if __name__ == "__main__":
     JIBRAIN_EXTRACTIONS.mkdir(parents=True, exist_ok=True)
     server = http.server.HTTPServer(("0.0.0.0", PORT), RelayHandler)
-    print(f"[relay] Bookmark relay v2 listening on :{PORT}", flush=True)
+    print(f"[relay] Bookmark relay v3 listening on :{PORT}", flush=True)
+    print(f"[relay] API: {INTAKE_API_URL}", flush=True)
     print(f"[relay] Jibrain extractions: {JIBRAIN_EXTRACTIONS}", flush=True)
     print(f"[relay] Endpoints: /intake, /intake/structured, /search, /doc, /tag, /relay-health", flush=True)
     try:

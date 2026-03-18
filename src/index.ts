@@ -73,6 +73,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { checkInput, checkOutput } from './guardrails.js';
 import { writeRemindersSnapshot } from './reminders.js';
 import { startVoiceApi } from './voice-api.js';
 
@@ -135,12 +136,70 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   );
 }
 
+
+// --- Auto-register gate: deny-all catch-all for unknown contacts ---
+interface AutoRegisterGate {
+  enabled: boolean;
+  mode: "allowlist" | "denylist";
+  allowed: string[];
+  notifyOwnerJid?: string;
+  rejectionMessage: string;
+}
+
+const AUTO_REGISTER_GATE_PATH = path.join(
+  process.env.HOME || "/Users/jibot",
+  ".config",
+  "nanoclaw",
+  "auto-register-gate.json",
+);
+
+function loadAutoRegisterGate(): AutoRegisterGate | null {
+  try {
+    const raw = fs.readFileSync(AUTO_REGISTER_GATE_PATH, "utf-8");
+    const gate = JSON.parse(raw) as AutoRegisterGate;
+    if (!gate.enabled) return null;
+    return gate;
+  } catch {
+    return null; // No gate file = no restriction (backward compatible)
+  }
+}
+
+function isAutoRegisterAllowed(chatJid: string): boolean {
+  const gate = loadAutoRegisterGate();
+  if (!gate) return true; // No gate = allow all (backward compatible)
+
+  if (gate.mode === "allowlist") {
+    return gate.allowed.some((pattern) => chatJid.includes(pattern));
+  }
+  // denylist mode
+  return !gate.allowed.some((pattern) => chatJid.includes(pattern));
+}
+
+function getGateRejectionMessage(): string {
+  const gate = loadAutoRegisterGate();
+  return gate?.rejectionMessage || "I am not configured to chat with unknown contacts.";
+}
+
+function getGateNotifyOwnerJid(): string | undefined {
+  const gate = loadAutoRegisterGate();
+  return gate?.notifyOwnerJid;
+}
+
 /**
  * Auto-register a new Signal DM contact using the default tier template.
  * Creates a per-contact folder (sig-{phone}) with CLAUDE.md copied from the template.
  */
 function autoRegisterSignalContact(chatJid: string, senderName: string): boolean {
   if (!SIGNAL_DEFAULT_TIER) return false;
+
+  // Deny-all gate: check if this contact is approved for auto-registration
+  if (!isAutoRegisterAllowed(chatJid)) {
+    logger.warn(
+      { chatJid, senderName },
+      "Auto-registration DENIED by gate (not on allowlist)",
+    );
+    return false;
+  }
 
   // Extract phone from JID (sig:+819048411965 → 819048411965)
   const phone = chatJid.replace(/^sig:\+?/, '');
@@ -188,6 +247,15 @@ function autoRegisterSignalContact(chatJid: string, senderName: string): boolean
  */
 function autoRegisterSlackContact(chatJid: string, nameOrId: string, isGroup: boolean): boolean {
   if (!SIGNAL_DEFAULT_TIER) return false;
+
+  // Deny-all gate: check if this contact is approved for auto-registration
+  if (!isAutoRegisterAllowed(chatJid)) {
+    logger.warn(
+      { chatJid, nameOrId },
+      "Auto-registration DENIED by gate (not on allowlist)",
+    );
+    return false;
+  }
 
   const idPart = chatJid.replace(/^slack:(?:channel:)?/, '');
   const folder = `slack-${idPart}`;
@@ -323,6 +391,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
+  // --- NeMo Guardrails: Input check ---
+  const inputCheck = await checkInput(
+    prompt,
+    missedMessages[0]?.sender,
+    chatJid.startsWith('sig:') ? 'signal' : chatJid.startsWith('slack:') ? 'slack' : 'other',
+  );
+  if (!inputCheck.allowed) {
+    logger.warn(
+      { group: group.name, reason: inputCheck.reason },
+      'Message blocked by guardrails',
+    );
+    await channel.sendMessage(chatJid, 'I cannot process that request.');
+    return true;
+  }
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -364,8 +447,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+        // --- NeMo Guardrails: Output check ---
+        const outputCheck = await checkOutput(prompt, text);
+        if (outputCheck.allowed) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        } else {
+          logger.warn(
+            { group: group.name, reason: outputCheck.reason },
+            'Output blocked by guardrails',
+          );
+          await channel.sendMessage(
+            chatJid,
+            'I generated a response but it was blocked by safety filters. Please try rephrasing your request.',
+          );
+          outputSentToUser = true;
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -699,7 +796,19 @@ async function main(): Promise<void> {
       signalCliUrl: SIGNAL_CLI_URL,
       signalAccount: SIGNAL_ACCOUNT,
       onNewContact: SIGNAL_DEFAULT_TIER ? (chatJid, senderName) => {
-        return autoRegisterSignalContact(chatJid, senderName);
+        const registered = autoRegisterSignalContact(chatJid, senderName);
+        if (!registered && !isAutoRegisterAllowed(chatJid)) {
+          // Deny-all catch-all: send rejection + notify owner
+          signal.sendMessage(chatJid, getGateRejectionMessage()).catch(() => {});
+          const ownerJid = getGateNotifyOwnerJid();
+          if (ownerJid) {
+            signal.sendMessage(
+              ownerJid,
+              `[gate] Unknown contact tried to message: ${senderName} (${chatJid})`,
+            ).catch(() => {});
+          }
+        }
+        return registered;
       } : undefined,
     });
     channels.push(signal);
@@ -719,7 +828,15 @@ async function main(): Promise<void> {
       slackAppToken: SLACK_APP_TOKEN,
       slackSigningSecret: SLACK_SIGNING_SECRET,
       onNewContact: SIGNAL_DEFAULT_TIER ? (chatJid, nameOrId, isGroup) => {
-        return autoRegisterSlackContact(chatJid, nameOrId, isGroup);
+        const registered = autoRegisterSlackContact(chatJid, nameOrId, isGroup);
+        if (!registered && !isAutoRegisterAllowed(chatJid)) {
+          logger.warn(
+            { chatJid, nameOrId },
+            "Slack contact rejected by auto-register gate",
+          );
+          // Slack rejection handled by the channel (no cross-channel notify needed)
+        }
+        return registered;
       } : undefined,
     });
     channels.push(slack);
