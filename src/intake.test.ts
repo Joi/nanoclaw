@@ -28,13 +28,15 @@ vi.mock('./logger.js', () => ({
 import fs from 'fs';
 import { writeIntakeFile, type IntakeMessage, type IntakeAttachment } from './intake.js';
 
+const CONFIDENTIAL_ROOT = '/data/confidential';
 const INTAKE_DIR = '/data/confidential/sankosh/intake';
 
 const BASE_MSG: IntakeMessage = {
   text: 'Hello world',
   author: 'Karma',
-  date: '2026-03-22T10:30:00Z',
-  source: 'slack:gidc:channel:C12345',
+  timestamp: '2026-03-22T10:30:00Z',
+  channelId: 'C12345',
+  channelName: 'general',
   workstream: 'sankosh',
 };
 
@@ -48,7 +50,7 @@ describe('writeIntakeFile', () => {
   });
 
   it('creates intake directory if it does not exist', () => {
-    writeIntakeFile(BASE_MSG);
+    writeIntakeFile(CONFIDENTIAL_ROOT, BASE_MSG);
 
     expect(fs.mkdirSync).toHaveBeenCalledWith(INTAKE_DIR, { recursive: true });
   });
@@ -56,7 +58,7 @@ describe('writeIntakeFile', () => {
   it('writes markdown file with correct frontmatter', () => {
     const msg: IntakeMessage = { ...BASE_MSG, text: 'Hello from Karma' };
 
-    writeIntakeFile(msg);
+    writeIntakeFile(CONFIDENTIAL_ROOT, msg);
 
     const [filePath, content] = getWriteCall();
 
@@ -74,7 +76,7 @@ describe('writeIntakeFile', () => {
   it('sanitizes author name for filename (lowercase, no spaces)', () => {
     const msg: IntakeMessage = { ...BASE_MSG, text: 'Hello', author: 'Test User' };
 
-    writeIntakeFile(msg);
+    writeIntakeFile(CONFIDENTIAL_ROOT, msg);
 
     const [filePath] = getWriteCall();
 
@@ -83,13 +85,13 @@ describe('writeIntakeFile', () => {
 
   it('includes attachment references in markdown body', () => {
     const attachments: IntakeAttachment[] = [
-      { filename: 'report.pdf', path: '/tmp/report.pdf' },
-      { filename: 'photo.jpg', path: '/tmp/photo.jpg' },
+      { originalFilename: 'report.pdf', savedPath: '/tmp/report.pdf' },
+      { originalFilename: 'photo.jpg', savedPath: '/tmp/photo.jpg' },
     ];
 
     const msg: IntakeMessage = { ...BASE_MSG, text: 'See attached files', attachments };
 
-    writeIntakeFile(msg);
+    writeIntakeFile(CONFIDENTIAL_ROOT, msg);
 
     const [, content] = getWriteCall();
 
@@ -100,13 +102,13 @@ describe('writeIntakeFile', () => {
 
   it('handles message with no text (attachment-only)', () => {
     const attachments: IntakeAttachment[] = [
-      { filename: 'document.pdf', path: '/tmp/document.pdf' },
+      { originalFilename: 'document.pdf', savedPath: '/tmp/document.pdf' },
     ];
 
     const { text: _omit, ...baseNoText } = BASE_MSG;
     const msg: IntakeMessage = { ...baseNoText, attachments };
 
-    writeIntakeFile(msg);
+    writeIntakeFile(CONFIDENTIAL_ROOT, msg);
 
     const [, content] = getWriteCall();
 
@@ -115,7 +117,7 @@ describe('writeIntakeFile', () => {
   });
 
   it('returns the written file path', () => {
-    const result = writeIntakeFile(BASE_MSG);
+    const result = writeIntakeFile(CONFIDENTIAL_ROOT, BASE_MSG);
 
     expect(result).toMatch(/^\/data\/confidential\/sankosh\/intake\/.*\.md$/);
   });

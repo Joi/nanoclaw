@@ -3,19 +3,18 @@ import path from 'path';
 
 import { logger } from './logger.js';
 
-const CONFIDENTIAL_ROOT = '/data/confidential';
-
 export interface IntakeAttachment {
-  filename: string;
-  path: string;
+  originalFilename: string;
+  savedPath: string;
 }
 
 export interface IntakeMessage {
   author: string;
-  source: string;
+  channelId: string;
+  channelName: string;
   workstream: string;
   text?: string;
-  date: string;
+  timestamp: string;
   attachments?: IntakeAttachment[];
 }
 
@@ -24,14 +23,14 @@ export interface IntakeMessage {
  * Creates the intake directory if needed, writes YAML frontmatter + body,
  * and returns the written file path.
  */
-export function writeIntakeFile(msg: IntakeMessage): string {
+export function writeIntakeFile(confidentialRoot: string, msg: IntakeMessage): string {
   // (1) Build intakeDir and create it
-  const intakeDir = path.join(CONFIDENTIAL_ROOT, msg.workstream, 'intake');
+  const intakeDir = path.join(confidentialRoot, msg.workstream, 'intake');
   fs.mkdirSync(intakeDir, { recursive: true });
 
-  // (2) Build safe filename: replace ':' with '-' in date, lowercase author
+  // (2) Build safe filename: replace ':' with '-' in timestamp, lowercase author
   //     replacing non-alphanumeric chars with '-'
-  const safeTimestamp = msg.date.replace(/:/g, '-');
+  const safeTimestamp = msg.timestamp.replace(/:/g, '-');
   const safeAuthor = msg.author.toLowerCase().replace(/[^a-z0-9]/g, '-');
   const filename = `${safeTimestamp}-${safeAuthor}.md`;
   const filePath = path.join(intakeDir, filename);
@@ -43,9 +42,9 @@ export function writeIntakeFile(msg: IntakeMessage): string {
   const frontmatter = [
     '---',
     'type: slack-intake',
-    `source: "${msg.source}"`,
+    `source: "slack:gidc:channel:${msg.channelId}"`,
     `author: "${msg.author}"`,
-    `date: "${msg.date}"`,
+    `date: "${msg.timestamp}"`,
     'classification: confidential',
     `workstream: "${msg.workstream}"`,
     `description: ${briefTopic}`,
@@ -58,7 +57,7 @@ export function writeIntakeFile(msg: IntakeMessage): string {
   if (msg.attachments && msg.attachments.length > 0) {
     body += '\n\n## Attachments\n';
     for (const attachment of msg.attachments) {
-      body += `\n- [${attachment.filename}](${attachment.path})`;
+      body += `\n- [${attachment.originalFilename}](${attachment.savedPath})`;
     }
   }
 
