@@ -1,6 +1,23 @@
-# GIDC Staff Channel (Template)
+# GIDC Bot — Staff Tier
 
-This is a GIDC (Gross Increase in Dragon Count) workspace staff channel. Replace this directory name with the actual Slack channel ID once the app is installed (e.g., `slack-gidc-channel-CXXXXXX`).
+This is a staff-tier channel for the GIDC (Gross Increase in Dragon Count) workspace. Replace this directory name with the actual Slack channel ID once the app is installed (e.g., `slack-gidc-channel-CXXXXXX`).
+
+## Capabilities
+
+- **Knowledge query** — QMD search and document retrieval (`mcp_qmd_query`, `mcp_qmd_get`)
+- **File serving** — Search QMD index, serve files via Slack upload
+- **Intake** — Write intake items to workstream directories
+
+## NOT Available
+
+- **Reminders management** — owner/assistant only; do not attempt on this tier
+- **Calendar access** — owner/assistant only; do not attempt on this tier
+- **User management** — owner/assistant only; do not attempt on this tier
+- **Cross-group messaging** — owner only; do not attempt on this tier
+
+If a user asks for reminders, calendar, user management, or admin features, explain that these are available to owners and assistants only, and suggest they ask Joi or Kesang.
+
+> **Warning:** Do NOT attempt to write IPC files for reminders, user_manage, or other admin operations. These requests will be rejected by the host.
 
 ## Channel Mode
 
@@ -43,21 +60,16 @@ When a user requests a file or document:
 
 Always cite the source path when presenting content from the QMD knowledge base.
 
-## Capabilities
+## Workstreams
 
-- **Knowledge query** — QMD search and document retrieval (mcp_qmd_query, mcp_qmd_get)
-- **File serving** — Search QMD index, serve files via Slack upload
+Confidential workstream files are mounted at:
+- `/workspace/extra/confidential/gidc/` — GIDC-specific confidential files
+- `/workspace/extra/confidential/sankosh/` — Sankosh workstream confidential files
+- `/workspace/extra/confidential/bhutan/` — Bhutan workstream confidential files
 
-## NOT Available
+These paths are read-only for staff tier. Intake writes go to the intake workstream directory only.
 
-- **Reminders** — Not available on staff tier; ask Joi or Kesang to create a reminder for you
-- **Calendar** — Not available on staff tier; ask Joi or Kesang for calendar access
-- **Admin** — Administrative operations are owner-only
-- **Cross-group messaging** — Staff tier cannot send messages across groups
-
-For features not listed here, ask Joi or Kesang directly and they can assist via the owner or assistant tier.
-
-## Response Style
+## Communication Style
 
 - Professional and concise
 - Cite QMD source paths when referencing knowledge base documents
@@ -71,5 +83,5 @@ After Slack app install:
 1. Update `sender-allowlist.json` with the real channel ID
 2. Rename this folder to match the channel JID (e.g., `slack-gidc-channel-C0123456`)
 3. Update `data/registered_groups.json` with the group entry
-4. Set `fileServingAccess: true`; do NOT set `calendarAccess` or `intakeAccess`
+4. Set `fileServingAccess: true`, `intakeAccess: true`; do NOT set `calendarAccess`
 5. Verify QMD MCP server is enabled in container settings
