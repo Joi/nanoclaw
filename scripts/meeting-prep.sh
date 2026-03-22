@@ -10,7 +10,8 @@
 #   meeting-prep /path/to/meetings.json
 #
 # Env vars (set by container runner):
-#   MEETING_PREP_URL   — credential proxy URL (Bearer token injected by proxy)
+#   MEETING_PREP_URL   — sprite URL (direct or credential proxy)
+#   MEETING_PREP_TOKEN — Bearer token (optional; if set, sent as Authorization header)
 
 set -euo pipefail
 
@@ -21,6 +22,12 @@ RETRY_DELAY=5
 if [ -z "${MEETING_PREP_URL:-}" ]; then
     echo "Error: MEETING_PREP_URL must be set" >&2
     exit 1
+fi
+
+# Build auth header if token is available (direct mode)
+AUTH_HEADER=()
+if [ -n "${MEETING_PREP_TOKEN:-}" ]; then
+    AUTH_HEADER=(-H "Authorization: Bearer ${MEETING_PREP_TOKEN}")
 fi
 
 # --- Warm up the sprite (Fly.io VMs auto-stop when idle) ---
@@ -105,6 +112,7 @@ call_sprite() {
 
         response=$(curl -s --max-time 120 -w '\n%{http_code}' \
             -X POST "${MEETING_PREP_URL}/meeting-prep" \
+            "${AUTH_HEADER[@]}" \
             -H "Content-Type: application/json" \
             -d "$body")
 

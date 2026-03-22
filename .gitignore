@@ -43,3 +43,6 @@ __pycache__/
 # Telegram session
 scripts/telegram-relay/relay.session
 scripts/telegram-relay/relay.log
+
+# Runtime database (root-level copy)
+nanoclaw.db

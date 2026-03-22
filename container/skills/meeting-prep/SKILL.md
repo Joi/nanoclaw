@@ -184,6 +184,7 @@ Full notes saved to jibrain/intake/meeting-prep-2026-02-24.md
 - **Prioritize actionable context** — pending action items, recent threads, open questions
 - **Skip noise** — don't mention routine calendar metadata, focus on what helps prepare
 - **Handle missing data gracefully** — if no emails or jibrain entries exist for an attendee, just note "no recent context" and move on
+- **Retry on sprite failure** — if the meeting-prep sprite returns a network/DNS error, wait 10 seconds and retry once. The sprite occasionally has transient DNS resolution failures. If the second attempt also fails, proceed with jibrain-only context and note the gap in the briefing.
 - **Respect time** — if there are 10+ meetings, summarize the top 5 most important and list the rest briefly
-- **Timezone** — Joi is in JST (+09:00). Display times in local time.
+- **Timezone** — Joi is in BTT (Asia/Thimphu, +06:00). Display times in local time.
 - **Use meeting-prep for joi@ito.com email** — never try to access joi@ito.com Gmail directly via gog
