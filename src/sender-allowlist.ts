@@ -39,12 +39,12 @@ export function loadSenderAllowlist(
   try {
     raw = fs.readFileSync(filePath, 'utf-8');
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return DEFAULT_CONFIG;
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { ...DEFAULT_CONFIG, chats: {} };
     logger.warn(
       { err, path: filePath },
       'sender-allowlist: cannot read config',
     );
-    return DEFAULT_CONFIG;
+    return { ...DEFAULT_CONFIG, chats: {} };
   }
 
   let parsed: unknown;
@@ -52,7 +52,7 @@ export function loadSenderAllowlist(
     parsed = JSON.parse(raw);
   } catch {
     logger.warn({ path: filePath }, 'sender-allowlist: invalid JSON');
-    return DEFAULT_CONFIG;
+    return { ...DEFAULT_CONFIG, chats: {} };
   }
 
   const obj = parsed as Record<string, unknown>;
@@ -62,7 +62,7 @@ export function loadSenderAllowlist(
       { path: filePath },
       'sender-allowlist: invalid or missing default entry',
     );
-    return DEFAULT_CONFIG;
+    return { ...DEFAULT_CONFIG, chats: {} };
   }
 
   const chats: Record<string, ChatAllowlistEntry> = {};

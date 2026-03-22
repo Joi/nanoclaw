@@ -307,6 +307,16 @@ describe('addAllowlistEntry', () => {
     expect(loaded.chats['group-b']).toEqual({ allow: ['carol'], mode: 'trigger' });
     expect(loaded.chats['group-a']).toEqual(newEntry);
   });
+
+  it('creates config file when path does not exist (bootstrap)', () => {
+    const p = cfgPath('bootstrap-test.json');
+    expect(fs.existsSync(p)).toBe(false);
+    const entry: ChatAllowlistEntry = { allow: ['alice'], mode: 'trigger' };
+    addAllowlistEntry('group-a', entry, p);
+    expect(fs.existsSync(p)).toBe(true);
+    const loaded = loadSenderAllowlist(p);
+    expect(loaded.chats['group-a']).toEqual(entry);
+  });
 });
 
 describe('removeAllowlistEntry', () => {
