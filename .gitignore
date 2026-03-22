@@ -16,6 +16,9 @@ groups/*
 !groups/gidc-admin/
 !groups/gidc-general/
 !groups/gidc-intake/
+!groups/gidc-template-owner/
+!groups/gidc-template-assistant/
+!groups/gidc-template-staff/
 groups/main/*
 groups/global/*
 groups/gidc-admin/*
@@ -25,7 +28,10 @@ groups/gidc-intake/*
 !groups/global/CLAUDE.md
 !groups/gidc-admin/CLAUDE.md
 !groups/gidc-general/CLAUDE.md
-!groups/gidc-intake/CLAUDE.md
+!groups/gidc-intake/
+!groups/gidc-template-owner/
+!groups/gidc-template-assistant/
+!groups/gidc-template-staff/CLAUDE.md
 
 # Secrets
 *.keys.json
