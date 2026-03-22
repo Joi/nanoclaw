@@ -3,10 +3,6 @@ import { describe, it, expect } from 'vitest';
 import { shouldRunIntake, shouldRouteToAgent } from './intake-routing.js';
 
 describe('shouldRunIntake', () => {
-  it('returns true in listening mode when not mentioned', () => {
-    expect(shouldRunIntake('listening', false)).toBe(true);
-  });
-
   it('returns true in listening mode regardless of explicit command', () => {
     expect(shouldRunIntake('listening', false)).toBe(true);
     expect(shouldRunIntake('listening', true)).toBe(true);
@@ -42,7 +38,7 @@ describe('shouldRouteToAgent', () => {
     expect(shouldRouteToAgent('available', false, false)).toBe(false);
   });
 
-  it('defaults to listening when channelMode is undefined', () => {
+  it('accepts undefined channelMode without error', () => {
     expect(shouldRouteToAgent(undefined, true, false)).toBe(true);
     expect(shouldRouteToAgent(undefined, false, false)).toBe(false);
   });
