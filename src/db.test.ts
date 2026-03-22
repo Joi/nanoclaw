@@ -515,3 +515,67 @@ describe("registered group calendarAccess", () => {
     expect(group.calendarAccess).toBe(false);
   });
 });
+
+// --- RegisteredGroup fileServingAccess / intakeAccess round-trip ---
+
+describe("registered group fileServingAccess", () => {
+  it("persists fileServingAccess=true through set/get round-trip", () => {
+    setRegisteredGroup("fileserv@s.whatsapp.net", {
+      name: "File Serving Chat",
+      folder: "whatsapp_fileserv",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      fileServingAccess: true,
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups["fileserv@s.whatsapp.net"];
+    expect(group).toBeDefined();
+    expect(group.fileServingAccess).toBe(true);
+  });
+
+  it("fileServingAccess defaults to false for groups without it", () => {
+    setRegisteredGroup("nofileserv@s.whatsapp.net", {
+      name: "No File Serving Chat",
+      folder: "whatsapp_nofileserv",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups["nofileserv@s.whatsapp.net"];
+    expect(group).toBeDefined();
+    expect(group.fileServingAccess).toBe(false);
+  });
+});
+
+describe("registered group intakeAccess", () => {
+  it("persists intakeAccess=true through set/get round-trip", () => {
+    setRegisteredGroup("intake@s.whatsapp.net", {
+      name: "Intake Chat",
+      folder: "whatsapp_intake",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      intakeAccess: true,
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups["intake@s.whatsapp.net"];
+    expect(group).toBeDefined();
+    expect(group.intakeAccess).toBe(true);
+  });
+
+  it("intakeAccess defaults to false for groups without it", () => {
+    setRegisteredGroup("nointake@s.whatsapp.net", {
+      name: "No Intake Chat",
+      folder: "whatsapp_nointake",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups["nointake@s.whatsapp.net"];
+    expect(group).toBeDefined();
+    expect(group.intakeAccess).toBe(false);
+  });
+});

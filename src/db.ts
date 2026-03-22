@@ -196,6 +196,24 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add file_serving_access column if it doesn't exist
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN file_serving_access INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add intake_access column if it doesn't exist
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN intake_access INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Remove UNIQUE constraint on folder (SQLite can't ALTER CONSTRAINT, so recreate)
   migrateRemoveFolderUnique(database);
 }
@@ -654,6 +672,8 @@ export function getRegisteredGroup(
         email_access: number | null;
         calendar_access: number | null;
         is_main: number | null;
+        file_serving_access: number | null;
+        intake_access: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -678,6 +698,8 @@ export function getRegisteredGroup(
     bookmarksAccess: row.bookmarks_access === 1,
     emailAccess: row.email_access === 1,
     calendarAccess: row.calendar_access === 1,
+    fileServingAccess: row.file_serving_access === 1,
+    intakeAccess: row.intake_access === 1,
     isMain: row.is_main === 1 ? true : undefined,
   };
 }
@@ -687,8 +709,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access, email_access, calendar_access, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access, email_access, calendar_access, is_main, file_serving_access, intake_access)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -702,6 +724,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.emailAccess ? 1 : 0,
     group.calendarAccess ? 1 : 0,
     group.isMain ? 1 : 0,
+    group.fileServingAccess ? 1 : 0,
+    group.intakeAccess ? 1 : 0,
   );
 }
 
@@ -719,6 +743,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     email_access: number | null;
     calendar_access: number | null;
     is_main: number | null;
+    file_serving_access: number | null;
+    intake_access: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -742,6 +768,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       bookmarksAccess: row.bookmarks_access === 1,
       emailAccess: row.email_access === 1,
       calendarAccess: row.calendar_access === 1,
+      fileServingAccess: row.file_serving_access === 1,
+      intakeAccess: row.intake_access === 1,
       isMain: row.is_main === 1 ? true : undefined,
     };
   }
