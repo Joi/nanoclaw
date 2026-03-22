@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { shouldRunIntake, shouldRouteToAgent } from './intake-routing.js';
+import { shouldRunIntake } from './intake-routing.js';
 
 describe('shouldRunIntake', () => {
   it('returns true in listening mode regardless of explicit command', () => {
@@ -19,27 +19,5 @@ describe('shouldRunIntake', () => {
   it('defaults to listening when channelMode is undefined', () => {
     expect(shouldRunIntake(undefined, false)).toBe(true);
     expect(shouldRunIntake(undefined, true)).toBe(true);
-  });
-});
-
-describe('shouldRouteToAgent', () => {
-  it('routes to agent when bot is mentioned (any mode)', () => {
-    expect(shouldRouteToAgent('listening', true, false)).toBe(true);
-    expect(shouldRouteToAgent('available', true, false)).toBe(true);
-  });
-
-  it('routes to agent for DMs (any mode)', () => {
-    expect(shouldRouteToAgent('listening', false, true)).toBe(true);
-    expect(shouldRouteToAgent('available', false, true)).toBe(true);
-  });
-
-  it('does NOT route to agent for non-mention channel messages', () => {
-    expect(shouldRouteToAgent('listening', false, false)).toBe(false);
-    expect(shouldRouteToAgent('available', false, false)).toBe(false);
-  });
-
-  it('accepts undefined channelMode without error', () => {
-    expect(shouldRouteToAgent(undefined, true, false)).toBe(true);
-    expect(shouldRouteToAgent(undefined, false, false)).toBe(false);
   });
 });

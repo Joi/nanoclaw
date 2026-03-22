@@ -1,3 +1,4 @@
+import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
@@ -28,6 +29,7 @@ const envConfig = readEnvFile([
   'MAIN_GROUP_FOLDER',
   'VOICE_API_PORT',
   'VOICE_API_TOKEN',
+  'CONFIDENTIAL_ROOT',
 ]);
 
 export const ASSISTANT_NAME =
@@ -139,3 +141,9 @@ export const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
 export const TELEGRAM_ONLY =
   (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+
+// Confidential workstream root for GIDC intake
+export const CONFIDENTIAL_ROOT =
+  process.env.CONFIDENTIAL_ROOT ||
+  envConfig.CONFIDENTIAL_ROOT ||
+  path.join(os.homedir(), 'switchboard', 'confidential');

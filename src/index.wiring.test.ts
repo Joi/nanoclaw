@@ -121,17 +121,18 @@ describe('GIDC intake pipeline wiring in index.ts', () => {
       expect(indexSource).toContain('shouldRunIntake(group.channelMode, false)');
     });
 
-    it("calls writeIntakeFile with confidentialRoot", () => {
-      expect(indexSource).toContain('writeIntakeFile(confidentialRoot,');
+    it("calls writeIntakeFile with CONFIDENTIAL_ROOT", () => {
+      expect(indexSource).toContain('writeIntakeFile(CONFIDENTIAL_ROOT,');
     });
 
     it("derives workstream from group.folder split on dash", () => {
       expect(indexSource).toContain("group.folder.split('-')[0]");
     });
 
-    it("derives confidentialRoot using process.env.HOME and switchboard/confidential", () => {
-      expect(indexSource).toContain("process.env.HOME || '/Users/jibot'");
-      expect(indexSource).toContain('switchboard/confidential');
+    it("imports CONFIDENTIAL_ROOT from config rather than hardcoding path", () => {
+      expect(indexSource).toContain('CONFIDENTIAL_ROOT');
+      // Path is now in config.ts, not inlined in index.ts
+      expect(indexSource).not.toContain("process.env.HOME || '/Users/jibot',\n            'switchboard/confidential'");
     });
 
     it("uses try/catch with logger.warn on error in GIDC intake block", () => {
@@ -155,7 +156,7 @@ describe('GIDC intake pipeline wiring in index.ts', () => {
 
     it("passes author from msg.sender_name in writeIntakeFile call", () => {
       const intakeBlock = indexSource.match(
-        /writeIntakeFile\(confidentialRoot,[\s\S]*?\}\s*\)/,
+        /writeIntakeFile\(CONFIDENTIAL_ROOT,[\s\S]*?\}\s*\)/,
       );
       expect(intakeBlock).not.toBeNull();
       expect(intakeBlock![0]).toContain('msg.sender_name');
@@ -163,7 +164,7 @@ describe('GIDC intake pipeline wiring in index.ts', () => {
 
     it("passes text from msg.content in writeIntakeFile call", () => {
       const intakeBlock = indexSource.match(
-        /writeIntakeFile\(confidentialRoot,[\s\S]*?\}\s*\)/,
+        /writeIntakeFile\(CONFIDENTIAL_ROOT,[\s\S]*?\}\s*\)/,
       );
       expect(intakeBlock).not.toBeNull();
       expect(intakeBlock![0]).toContain('msg.content');
@@ -171,7 +172,7 @@ describe('GIDC intake pipeline wiring in index.ts', () => {
 
     it("passes timestamp from msg.timestamp in writeIntakeFile call", () => {
       const intakeBlock = indexSource.match(
-        /writeIntakeFile\(confidentialRoot,[\s\S]*?\}\s*\)/,
+        /writeIntakeFile\(CONFIDENTIAL_ROOT,[\s\S]*?\}\s*\)/,
       );
       expect(intakeBlock).not.toBeNull();
       expect(intakeBlock![0]).toContain('msg.timestamp');

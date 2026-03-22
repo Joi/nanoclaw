@@ -11,11 +11,3 @@ export function shouldRunIntake(
   // available mode
   return explicitIntakeCommand;
 }
-
-export function shouldRouteToAgent(
-  _channelMode: ChannelMode,
-  botMentioned: boolean,
-  isDm: boolean,
-): boolean {
-  return botMentioned || isDm;
-}

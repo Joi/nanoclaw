@@ -29,6 +29,7 @@ import {
   TRIGGER_PATTERN,
   VOICE_API_TOKEN,
   EMAIL_INTAKE_ENABLED,
+  CONFIDENTIAL_ROOT,
   EMAIL_INTAKE_FROM_FILTER,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
@@ -809,15 +810,19 @@ async function main(): Promise<void> {
         const group = registeredGroups[chatJid];
         if (group.intakeAccess && shouldRunIntake(group.channelMode, false)) {
           // folder names are prefixed with workstream (e.g. 'sankosh-intake' -> 'sankosh')
-          const workstream = group.folder.split('-')[0] || 'gidc';
-          const confidentialRoot = path.join(
-            process.env.HOME || '/Users/jibot',
-            'switchboard/confidential',
-          );
+          const workstream = group.folder.split('-')[0];
+          // Guard: skip intake if workstream is empty or has no matching directory
+          // (prevents silent writes for DM groups or folders without a '-' delimiter)
+          if (!workstream || !fs.existsSync(path.join(CONFIDENTIAL_ROOT, workstream))) {
+            logger.warn(
+              { folder: group.folder, workstream, group: chatJid },
+              'GIDC intake skipped: no matching workstream directory',
+            );
+          } else {
           const channelId = chatJid.split(':').pop() || '';
           const channelName = group.name;
           try {
-            writeIntakeFile(confidentialRoot, {
+            writeIntakeFile(CONFIDENTIAL_ROOT, {
               author: msg.sender_name,
               channelId,
               channelName,
@@ -828,6 +833,7 @@ async function main(): Promise<void> {
           } catch (err) {
             logger.warn({ err }, 'GIDC intake write failed');
           }
+          } // end else: workstream directory exists
         }
       }
 
