@@ -7,8 +7,9 @@ describe('shouldRunIntake', () => {
     expect(shouldRunIntake('listening', false)).toBe(true);
   });
 
-  it('returns true in listening mode when mentioned', () => {
+  it('returns true in listening mode regardless of explicit command', () => {
     expect(shouldRunIntake('listening', false)).toBe(true);
+    expect(shouldRunIntake('listening', true)).toBe(true);
   });
 
   it('returns false in available mode when not explicitly commanded', () => {
@@ -21,7 +22,7 @@ describe('shouldRunIntake', () => {
 
   it('defaults to listening when channelMode is undefined', () => {
     expect(shouldRunIntake(undefined, false)).toBe(true);
-    expect(shouldRunIntake(undefined, false)).toBe(true);
+    expect(shouldRunIntake(undefined, true)).toBe(true);
   });
 });
 
