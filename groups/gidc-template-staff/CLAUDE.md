@@ -6,6 +6,8 @@ This is a GIDC (Gross Increase in Dragon Count) workspace staff channel. Replace
 
 `available` — Respond when triggered by the allowlisted sender pattern.
 
+Mode switching is not supported on the staff tier.
+
 ## Knowledge Base (QMD Search)
 
 The GIDC knowledge base is indexed and queryable via QMD tools. Always search before answering knowledge questions.

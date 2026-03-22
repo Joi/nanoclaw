@@ -59,6 +59,7 @@ Always cite the source path when presenting content from the QMD knowledge base.
 
 ## NOT Available (Owner Only)
 
+- **File mount write access** — Writing to workspace file mount paths is owner tier only
 - **Cross-group messaging** — Only the owner tier can send messages across groups
 - **Force QMD scan** (`@gibot scan`) — Triggering a QMD knowledge base re-index is restricted to owner
 
