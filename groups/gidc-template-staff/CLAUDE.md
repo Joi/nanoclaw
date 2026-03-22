@@ -45,7 +45,6 @@ Always cite the source path when presenting content from the QMD knowledge base.
 
 - **Knowledge query** — QMD search and document retrieval (mcp_qmd_query, mcp_qmd_get)
 - **File serving** — Search QMD index, serve files via Slack upload
-- **Web search and fetch** — External research
 
 ## NOT Available
 
