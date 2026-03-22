@@ -10,6 +10,7 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { processBookmarkIpc } from './bookmarks.js';
 import { processRemindersIpc } from './reminders.js';
+import { addAllowlistEntry, removeAllowlistEntry } from './sender-allowlist.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -248,6 +249,11 @@ export async function processTaskIpc(
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
     targetFolder?: string;
+    // For user_manage
+    action?: string;
+    slackUserId?: string;
+    namespace?: string;
+    tier?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -572,6 +578,51 @@ export async function processTaskIpc(
           { data },
           'Invalid link_account request - missing jid or targetFolder',
         );
+      }
+      break;
+
+    case 'user_manage':
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized user_manage attempt blocked');
+        break;
+      }
+      if (!data.slackUserId || !data.namespace) {
+        logger.warn(
+          { data },
+          'Invalid user_manage request - missing slackUserId or namespace',
+        );
+        break;
+      }
+      {
+        const userJid = `slack:${data.namespace}:${data.slackUserId}`;
+        const action = data.action;
+        if (action === 'add') {
+          const validTiers = ['owner', 'assistant', 'staff'] as const;
+          type ValidTier = (typeof validTiers)[number];
+          if (!validTiers.includes(data.tier as ValidTier)) {
+            logger.warn({ tier: data.tier }, 'user_manage: invalid tier');
+            break;
+          }
+          const tier = data.tier as ValidTier;
+          const templateFolder = `gidc-template-${tier}`;
+          const isAdminTier = tier === 'owner' || tier === 'assistant';
+          deps.registerGroup(userJid, {
+            name: userJid,
+            folder: templateFolder,
+            trigger: userJid,
+            added_at: new Date().toISOString(),
+            requiresTrigger: true,
+            remindersAccess: isAdminTier ? true : undefined,
+            calendarAccess: isAdminTier ? true : undefined,
+          });
+          addAllowlistEntry(userJid, { allow: '*', mode: 'trigger' });
+          logger.info({ userJid, tier }, 'user_manage: user added');
+        } else if (action === 'remove') {
+          removeAllowlistEntry(userJid);
+          logger.info({ userJid }, 'user_manage: user removed');
+        } else {
+          logger.warn({ action, userJid }, 'user_manage: unknown action');
+        }
       }
       break;
 
