@@ -187,6 +187,15 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add calendar_access column if it doesn't exist
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN calendar_access INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Remove UNIQUE constraint on folder (SQLite can't ALTER CONSTRAINT, so recreate)
   migrateRemoveFolderUnique(database);
 }
@@ -211,12 +220,14 @@ function migrateRemoveFolderUnique(database: Database.Database): void {
       reminders_access INTEGER DEFAULT 0,
       bookmarks_access INTEGER DEFAULT 0,
       email_access INTEGER DEFAULT 0,
+      calendar_access INTEGER DEFAULT 0,
       is_main INTEGER DEFAULT 0
     );
     INSERT INTO registered_groups_new SELECT
       jid, name, folder, trigger_pattern, added_at, container_config,
       requires_trigger, reminders_access, bookmarks_access,
       COALESCE(email_access, 0),
+      COALESCE(calendar_access, 0),
       COALESCE(is_main, 0)
     FROM registered_groups;
     DROP TABLE registered_groups;
@@ -641,6 +652,7 @@ export function getRegisteredGroup(
         reminders_access: number | null;
         bookmarks_access: number | null;
         email_access: number | null;
+        calendar_access: number | null;
         is_main: number | null;
       }
     | undefined;
@@ -665,6 +677,7 @@ export function getRegisteredGroup(
     remindersAccess: row.reminders_access === 1,
     bookmarksAccess: row.bookmarks_access === 1,
     emailAccess: row.email_access === 1,
+    calendarAccess: row.calendar_access === 1,
     isMain: row.is_main === 1 ? true : undefined,
   };
 }
@@ -674,8 +687,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access, email_access, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access, email_access, calendar_access, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -687,6 +700,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.remindersAccess ? 1 : 0,
     group.bookmarksAccess ? 1 : 0,
     group.emailAccess ? 1 : 0,
+    group.calendarAccess ? 1 : 0,
     group.isMain ? 1 : 0,
   );
 }
@@ -703,6 +717,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     reminders_access: number | null;
     bookmarks_access: number | null;
     email_access: number | null;
+    calendar_access: number | null;
     is_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
@@ -726,6 +741,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       remindersAccess: row.reminders_access === 1,
       bookmarksAccess: row.bookmarks_access === 1,
       emailAccess: row.email_access === 1,
+      calendarAccess: row.calendar_access === 1,
       isMain: row.is_main === 1 ? true : undefined,
     };
   }
@@ -749,6 +765,7 @@ export function getRegisteredGroupsByFolder(
     reminders_access: number | null;
     bookmarks_access: number | null;
     email_access: number | null;
+    calendar_access: number | null;
   }>;
   return rows
     .filter((row) => isValidGroupFolder(row.folder))
@@ -766,6 +783,7 @@ export function getRegisteredGroupsByFolder(
       remindersAccess: row.reminders_access === 1,
       bookmarksAccess: row.bookmarks_access === 1,
       emailAccess: row.email_access === 1,
+      calendarAccess: row.calendar_access === 1,
     }));
 }
 

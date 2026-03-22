@@ -482,3 +482,36 @@ describe('registered group isMain', () => {
     expect(group.isMain).toBeUndefined();
   });
 });
+
+// --- RegisteredGroup calendarAccess round-trip ---
+
+describe("registered group calendarAccess", () => {
+  it("persists calendarAccess=true through set/get round-trip", () => {
+    setRegisteredGroup("cal@s.whatsapp.net", {
+      name: "Calendar Chat",
+      folder: "whatsapp_calendar",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      calendarAccess: true,
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups["cal@s.whatsapp.net"];
+    expect(group).toBeDefined();
+    expect(group.calendarAccess).toBe(true);
+  });
+
+  it("calendarAccess defaults to false for groups without it", () => {
+    setRegisteredGroup("nocal@s.whatsapp.net", {
+      name: "No Calendar Chat",
+      folder: "whatsapp_nocal",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups["nocal@s.whatsapp.net"];
+    expect(group).toBeDefined();
+    expect(group.calendarAccess).toBe(false);
+  });
+});
