@@ -180,7 +180,7 @@ describe('GIDC intake pipeline wiring in index.ts', () => {
   });
 });
 
-describe('@gibot mode/scan command handling in processGroupMessages', () => {
+describe('@jibot mode/scan command handling in processGroupMessages', () => {
   describe('import', () => {
     it('imports parseGidcCommand from gidc-commands.js', () => {
       expect(indexSource).toContain("from './gidc-commands.js'");

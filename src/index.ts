@@ -398,7 +398,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  // GIDC @gibot commands: handle mode and scan before running the agent
+  // GIDC @jibot commands: handle mode and scan before running the agent
   if (chatJid.startsWith('slack:gidc:') && missedMessages.length === 1) {
     const msg = missedMessages[0];
     const cmd = parseGidcCommand(msg.content);

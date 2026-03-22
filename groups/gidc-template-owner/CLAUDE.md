@@ -9,7 +9,7 @@ Owner-tier direct message for the GIDC (Gross Increase in Dragon Count) workspac
 - **Intake** — Write intake items to workstream directories
 - **Apple Reminders** — Create, list, complete, and update reminders via IPC bridge
 - **Calendar** — Read calendar events via `gog` CLI (joi@ito.com; read-only)
-- **Admin commands** — `@gibot scan`, mode switching
+- **Admin commands** — `@jibot scan`, mode switching
 - **Cross-group messaging** — Send messages to other registered groups (owner only)
 
 ## Channel Modes
@@ -21,9 +21,9 @@ Supported modes:
 - `available` — Respond to all messages
 
 Commands:
-- `@gibot mode listening` — Switch to listening mode
-- `@gibot mode available` — Switch to available mode
-- `@gibot scan` — Force a QMD knowledge base re-scan (owner only)
+- `@jibot mode listening` — Switch to listening mode
+- `@jibot mode available` — Switch to available mode
+- `@jibot scan` — Force a QMD knowledge base re-scan (owner only)
 
 ## Knowledge Base (QMD Search)
 

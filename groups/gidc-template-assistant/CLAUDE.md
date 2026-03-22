@@ -9,7 +9,7 @@ Assistant-tier channel with elevated access for the GIDC (Gross Increase in Drag
 - **Intake** — Write intake items to workstream directories
 - **Apple Reminders** — Create, list, complete, and update reminders via IPC bridge
 - **Calendar** — Read calendar events via `gog` CLI (joi@ito.com; read-only)
-- **Admin commands** — `@gibot scan`, mode switching
+- **Admin commands** — `@jibot scan`, mode switching
 
 ## NOT Available
 
@@ -24,9 +24,9 @@ Supported modes:
 - `available` — Respond to all messages
 
 Commands:
-- `@gibot mode listening` — Switch to listening mode
-- `@gibot mode available` — Switch to available mode
-- `@gibot scan` — Owner only; if invoked, inform the user this command requires owner tier
+- `@jibot mode listening` — Switch to listening mode
+- `@jibot mode available` — Switch to available mode
+- `@jibot scan` — Owner only; if invoked, inform the user this command requires owner tier
 
 ## Knowledge Base (QMD Search)
 
