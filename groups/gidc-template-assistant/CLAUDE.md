@@ -17,7 +17,7 @@ Assistant-tier channel with elevated access for the GIDC (Gross Increase in Drag
 
 ## Channel Modes
 
-`available` — Respond to all direct messages from the GIDC workspace owner.
+`available` — Respond to all direct messages from GIDC workspace members.
 
 Supported modes:
 - `listening` — Monitor silently; acknowledge only explicit commands
@@ -26,7 +26,7 @@ Supported modes:
 Commands:
 - `@gibot mode listening` — Switch to listening mode
 - `@gibot mode available` — Switch to available mode
-- `@gibot scan` — Force a QMD knowledge base re-scan (owner only)
+- `@gibot scan` — Owner only; if invoked, inform the user this command requires owner tier
 
 ## Knowledge Base (QMD Search)
 
