@@ -2,7 +2,6 @@ export type ChannelMode = 'listening' | 'available' | undefined;
 
 export function shouldRunIntake(
   channelMode: ChannelMode,
-  _botMentioned: boolean,
   explicitIntakeCommand: boolean,
 ): boolean {
   const mode = channelMode ?? 'listening';
