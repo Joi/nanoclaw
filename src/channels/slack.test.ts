@@ -459,7 +459,6 @@ describe('SlackChannel', () => {
   describe('sendFile', () => {
     it('uploads a file to a channel JID', async () => {
       const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
-      const app = currentApp();
       await channel.connect();
 
       await channel.sendFile('slack:gidc:channel:C67890DEF', 'report.pdf', Buffer.from('content'));
@@ -495,7 +494,6 @@ describe('SlackChannel', () => {
 
     it('throws on upload failure', async () => {
       const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
-      const app = currentApp();
       mockFilesUploadV2.mockRejectedValueOnce(new Error('upload_failed'));
       await channel.connect();
 
