@@ -19,6 +19,10 @@ const envConfig = readEnvFile([
   'SLACK_2_APP_TOKEN',
   'SLACK_2_SIGNING_SECRET',
   'SLACK_2_NAMESPACE',
+  'SLACK_3_BOT_TOKEN',
+  'SLACK_3_APP_TOKEN',
+  'SLACK_3_SIGNING_SECRET',
+  'SLACK_3_NAMESPACE',
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
   'MAIN_GROUP_FOLDER',
@@ -45,6 +49,11 @@ export const SLACK_2_BOT_TOKEN = process.env.SLACK_2_BOT_TOKEN || envConfig.SLAC
 export const SLACK_2_APP_TOKEN = process.env.SLACK_2_APP_TOKEN || envConfig.SLACK_2_APP_TOKEN || '';
 export const SLACK_2_SIGNING_SECRET = process.env.SLACK_2_SIGNING_SECRET || envConfig.SLACK_2_SIGNING_SECRET || '';
 export const SLACK_2_NAMESPACE = process.env.SLACK_2_NAMESPACE || envConfig.SLACK_2_NAMESPACE || '';
+// Third Slack workspace (GIDC)
+export const SLACK_3_BOT_TOKEN = process.env.SLACK_3_BOT_TOKEN || envConfig.SLACK_3_BOT_TOKEN || '';
+export const SLACK_3_APP_TOKEN = process.env.SLACK_3_APP_TOKEN || envConfig.SLACK_3_APP_TOKEN || '';
+export const SLACK_3_SIGNING_SECRET = process.env.SLACK_3_SIGNING_SECRET || envConfig.SLACK_3_SIGNING_SECRET || '';
+export const SLACK_3_NAMESPACE = process.env.SLACK_3_NAMESPACE || envConfig.SLACK_3_NAMESPACE || '';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
