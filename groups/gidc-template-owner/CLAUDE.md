@@ -164,17 +164,22 @@ Write a JSON file to: `/workspace/ipc/tasks/<unique-name>.json`
 **add** — Add a user to the workspace member list:
 ```json
 {
-  "type": "add_user",
-  "jid": "slack-gidc-U0123456",
-  "name": "Alice Example"
+  "type": "user_manage",
+  "action": "add",
+  "slackUserId": "U0123456",
+  "namespace": "gidc",
+  "tier": "staff"
 }
 ```
+`tier` must be `"owner"`, `"assistant"`, or `"staff"`.
 
 **remove** — Remove a user from the workspace member list:
 ```json
 {
-  "type": "remove_user",
-  "jid": "slack-gidc-U0123456"
+  "type": "user_manage",
+  "action": "remove",
+  "slackUserId": "U0123456",
+  "namespace": "gidc"
 }
 ```
 
@@ -184,15 +189,23 @@ Current workspace members are available at `/workspace/ipc/users_snapshot.json`:
 
 ```json
 {
+  "namespace": "gidc",
+  "generatedAt": "2026-03-22T10:00:00Z",
   "users": [
-    {"jid": "slack-gidc-U0123456", "name": "Alice Example"}
-  ],
-  "timestamp": "2026-03-22T10:00:00"
+    {
+      "slackUserId": "U0123456",
+      "jid": "slack:gidc:U0123456",
+      "name": "slack:gidc:U0123456",
+      "tier": "staff",
+      "addedAt": "2026-03-22T10:00:00Z",
+      "remindersAccess": false,
+      "calendarAccess": false
+    }
+  ]
 }
 ```
 
-Read this snapshot first to avoid duplicate add operations.
-
+Read this snapshot first to avoid duplicate add operations. Note: `name` defaults to the JID string — it is not a human-readable display name.
 ## Workstreams
 
 Confidential workstream files are mounted at:
