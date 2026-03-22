@@ -276,4 +276,16 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     const content = JSON.parse(settingsCall![1] as string);
     expect(content.mcpServers).toBeUndefined();
   });
+
+  it("does not rewrite settings.json if it already exists", () => {
+    vi.mocked(fs.existsSync).mockImplementation(
+      (p) => typeof p === "string" && p.includes("settings.json"),
+    );
+    runContainerAgent(testGroup, testInput, () => {});
+    const settingsCalls = vi.mocked(fs.writeFileSync).mock.calls.filter(
+      ([filePath]) =>
+        typeof filePath === "string" && filePath.includes("settings.json"),
+    );
+    expect(settingsCalls).toHaveLength(0);
+  });
 });

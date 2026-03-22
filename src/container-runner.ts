@@ -146,10 +146,16 @@ function buildVolumeMounts(
     settingsObj.mcpServers = {
       qmd: {
         command: '/bin/sh',
+        // socat bridges container stdio -> TCP, letting Claude Code connect to QMD
+        // as if it were a local process (MCP stdio transport over TCP to the host)
+        // QMD MCP server on jibotmac host port 3141, reached via Docker host gateway
         args: ['-c', 'exec socat STDIO TCP:host.docker.internal:3141'],
       },
     };
   }
+  // One-time write: settings.json is not updated after creation.
+  // To apply access changes (e.g. intakeAccess -> qmd MCP server),
+  // delete the file -- it will be regenerated on next container start.
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(settingsFile, JSON.stringify(settingsObj, null, 2) + '\n');
   }
