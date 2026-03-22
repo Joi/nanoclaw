@@ -143,21 +143,23 @@ export function addAllowlistEntry(
   entry: ChatAllowlistEntry,
   pathOverride?: string,
 ): void {
-  const cfg = loadSenderAllowlist(pathOverride);
+  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
+  const cfg = loadSenderAllowlist(filePath);
   cfg.chats[jid] = entry;
-  saveSenderAllowlist(cfg, pathOverride);
-  logger.info({ jid, path: pathOverride }, 'sender-allowlist: entry added');
+  saveSenderAllowlist(cfg, filePath);
+  logger.info({ jid, path: filePath }, 'sender-allowlist: entry added');
 }
 
 export function removeAllowlistEntry(
   jid: string,
   pathOverride?: string,
 ): boolean {
-  const cfg = loadSenderAllowlist(pathOverride);
+  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
+  const cfg = loadSenderAllowlist(filePath);
   if (!(jid in cfg.chats)) return false;
   delete cfg.chats[jid];
-  saveSenderAllowlist(cfg, pathOverride);
-  logger.info({ jid, path: pathOverride }, 'sender-allowlist: entry removed');
+  saveSenderAllowlist(cfg, filePath);
+  logger.info({ jid, path: filePath }, 'sender-allowlist: entry removed');
   return true;
 }
 
