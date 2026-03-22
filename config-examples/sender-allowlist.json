@@ -4,7 +4,6 @@
     "mode": "drop"
   },
   "chats": {
-    "_comment_gidc": "GIDC Slack channels -- fill in actual channel IDs after Slack app install",
     "slack:gidc:channel:PLACEHOLDER_SANKOSH": {
       "allow": "*",
       "mode": "trigger"
