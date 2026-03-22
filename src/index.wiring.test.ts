@@ -178,3 +178,68 @@ describe('GIDC intake pipeline wiring in index.ts', () => {
     });
   });
 });
+
+describe('@gibot mode/scan command handling in processGroupMessages', () => {
+  describe('import', () => {
+    it('imports parseGidcCommand from gidc-commands.js', () => {
+      expect(indexSource).toContain("from './gidc-commands.js'");
+      expect(indexSource).toContain('parseGidcCommand');
+    });
+  });
+
+  describe('command detection block', () => {
+    it('checks chatJid starts with slack:gidc: and missedMessages.length === 1', () => {
+      expect(indexSource).toContain("chatJid.startsWith('slack:gidc:')");
+      expect(indexSource).toContain('missedMessages.length === 1');
+    });
+
+    it('calls parseGidcCommand on the last message content', () => {
+      expect(indexSource).toContain('parseGidcCommand(');
+    });
+  });
+
+  describe('mode command handler', () => {
+    it('updates group.channelMode with cmd.value', () => {
+      expect(indexSource).toContain('group.channelMode = cmd.value');
+    });
+
+    it('persists the group via setRegisteredGroup', () => {
+      expect(indexSource).toContain('setRegisteredGroup(chatJid, group)');
+    });
+
+    it('sends listening mode confirmation message', () => {
+      expect(indexSource).toContain('All messages will be captured as intake.');
+    });
+
+    it('sends available mode confirmation message', () => {
+      expect(indexSource).toContain('Intake only runs on explicit command.');
+    });
+  });
+
+  describe('scan command handler', () => {
+    it('sends Starting QMD re-index scan... message', () => {
+      expect(indexSource).toContain('Starting QMD re-index scan...');
+    });
+
+    it('calls execFile with qmd and index --all', () => {
+      expect(indexSource).toContain("'qmd'");
+      expect(indexSource).toContain("'index'");
+      expect(indexSource).toContain("'--all'");
+    });
+  });
+
+  describe('command handler placement', () => {
+    it('GIDC command block appears BEFORE formatMessages call in processGroupMessages', () => {
+      const processFnMatch = indexSource.match(
+        /async function processGroupMessages[\s\S]*?(?=async function runAgent)/,
+      );
+      expect(processFnMatch).not.toBeNull();
+      const fn = processFnMatch![0];
+      const cmdBlockPos = fn.indexOf('parseGidcCommand(');
+      const formatMessagesPos = fn.indexOf('formatMessages(');
+      expect(cmdBlockPos).toBeGreaterThan(-1);
+      expect(formatMessagesPos).toBeGreaterThan(-1);
+      expect(cmdBlockPos).toBeLessThan(formatMessagesPos);
+    });
+  });
+});

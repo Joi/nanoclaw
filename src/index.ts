@@ -82,6 +82,7 @@ import { writeRemindersSnapshot } from './reminders.js';
 import { startVoiceApi } from './voice-api.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
+import { parseGidcCommand } from './gidc-commands.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -393,6 +394,35 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
+  }
+
+  // GIDC @gibot commands: handle mode and scan before running the agent
+  if (chatJid.startsWith('slack:gidc:') && missedMessages.length === 1) {
+    const lastMsg = missedMessages[0];
+    const cmd = parseGidcCommand(lastMsg.content);
+    if (cmd) {
+      if (cmd.type === 'mode') {
+        group.channelMode = cmd.value;
+        setRegisteredGroup(chatJid, group);
+        const modeDesc =
+          cmd.value === 'listening'
+            ? 'All messages will be captured as intake.'
+            : 'Intake only runs on explicit command.';
+        await channel.sendMessage(chatJid, `Mode set to ${cmd.value}. ${modeDesc}`);
+        return true;
+      }
+      if (cmd.type === 'scan') {
+        await channel.sendMessage(chatJid, 'Starting QMD re-index scan...');
+        execFile('qmd', ['index', '--all'], (err) => {
+          if (err) {
+            channel.sendMessage(chatJid, `QMD scan failed: ${err.message}`).catch(() => {});
+          } else {
+            channel.sendMessage(chatJid, 'QMD re-index scan complete.').catch(() => {});
+          }
+        });
+        return true;
+      }
+    }
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
