@@ -47,12 +47,12 @@ export function writeIntakeFile(confidentialRoot: string, msg: IntakeMessage): s
     `date: "${msg.timestamp}"`,
     'classification: confidential',
     `workstream: "${msg.workstream}"`,
-    `description: ${briefTopic}`,
+    `description: "${briefTopic.replace(/"/g, "'").replace(/\n/g, " ")}"`,
     '---',
   ].join('\n');
 
   // (5) Build body: text + optional '## Attachments' section
-  let body = msg.text ?? '';
+  let body = msg.text;
 
   if (msg.attachments && msg.attachments.length > 0) {
     body += '\n\n## Attachments\n';

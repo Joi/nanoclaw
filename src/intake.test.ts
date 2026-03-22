@@ -113,11 +113,24 @@ describe('writeIntakeFile', () => {
 
     expect(content).toContain('type: slack-intake');
     expect(content).toContain('document.pdf');
+    expect(content).toContain('description:');
+    expect(content).toContain('attachment upload');
   });
 
   it('returns the written file path', () => {
     const result = writeIntakeFile(CONFIDENTIAL_ROOT, BASE_MSG);
 
     expect(result).toMatch(/^\/data\/confidential\/sankosh\/intake\/.*\.md$/);
+  });
+
+  it('wraps description in quotes to handle colons in message text', () => {
+    const msg: IntakeMessage = { ...BASE_MSG, text: 'Check out: https://example.com' };
+
+    writeIntakeFile(CONFIDENTIAL_ROOT, msg);
+
+    const [, content] = getWriteCall();
+
+    // description must be quoted to prevent YAML corruption on colons
+    expect(content).toContain('description: "Check out: https://example.com"');
   });
 });
