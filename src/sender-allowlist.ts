@@ -137,3 +137,33 @@ export function saveSenderAllowlist(
   fs.writeFileSync(filePath, json, 'utf-8');
   logger.info({ path: filePath }, 'sender-allowlist: config saved');
 }
+
+export function addAllowlistEntry(
+  jid: string,
+  entry: ChatAllowlistEntry,
+  pathOverride?: string,
+): void {
+  const cfg = loadSenderAllowlist(pathOverride);
+  cfg.chats[jid] = entry;
+  saveSenderAllowlist(cfg, pathOverride);
+  logger.info({ jid, path: pathOverride }, 'sender-allowlist: entry added');
+}
+
+export function removeAllowlistEntry(
+  jid: string,
+  pathOverride?: string,
+): boolean {
+  const cfg = loadSenderAllowlist(pathOverride);
+  if (!(jid in cfg.chats)) return false;
+  delete cfg.chats[jid];
+  saveSenderAllowlist(cfg, pathOverride);
+  logger.info({ jid, path: pathOverride }, 'sender-allowlist: entry removed');
+  return true;
+}
+
+export function listAllowlistEntries(
+  pathOverride?: string,
+): Record<string, ChatAllowlistEntry> {
+  const cfg = loadSenderAllowlist(pathOverride);
+  return cfg.chats;
+}
