@@ -240,7 +240,7 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers.qmd).toEqual({
       command: "/bin/sh",
-      args: ["-c", "exec socat STDIO TCP:host.docker.internal:3141"],
+      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
     });
   });
 
@@ -261,7 +261,7 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers.qmd).toEqual({
       command: "/bin/sh",
-      args: ["-c", "exec socat STDIO TCP:host.docker.internal:3141"],
+      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
     });
   });
 
