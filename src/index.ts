@@ -608,6 +608,7 @@ async function runAgent(
         remindersAccess: !!group.remindersAccess,
         bookmarksAccess: !!group.bookmarksAccess,
         emailAccess: !!group.emailAccess,
+        calendarAccess: !!group.calendarAccess,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>

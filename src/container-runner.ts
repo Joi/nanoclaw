@@ -47,6 +47,7 @@ export interface ContainerInput {
   remindersAccess?: boolean;
   bookmarksAccess?: boolean;
   emailAccess?: boolean;
+  calendarAccess?: boolean;
 }
 
 export interface ContainerOutput {
