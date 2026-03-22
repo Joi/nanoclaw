@@ -67,7 +67,6 @@ These paths are read-write for intake and admin operations.
 - **Reminders** — Create and manage reminders via gog CLI
 - **Calendar** — Read/write calendar events via gog CLI (joi@ito.com calendar)
 - **Admin** — Cross-group messaging and coordination (owner only)
-- **Web search and fetch** — External research
 
 ## Response Style
 

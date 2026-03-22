@@ -56,7 +56,6 @@ Always cite the source path when presenting content from the QMD knowledge base.
 - **Intake** — Write intake items to workstream directories (intakeAccess)
 - **Reminders** — Create and manage reminders via gog CLI
 - **Calendar** — Read calendar events via gog CLI (joi@ito.com calendar)
-- **Web search and fetch** — External research
 
 ## NOT Available (Owner Only)
 
