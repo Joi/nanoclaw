@@ -13,10 +13,19 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/gidc-admin/
+!groups/gidc-general/
+!groups/gidc-intake/
 groups/main/*
 groups/global/*
+groups/gidc-admin/*
+groups/gidc-general/*
+groups/gidc-intake/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/gidc-admin/CLAUDE.md
+!groups/gidc-general/CLAUDE.md
+!groups/gidc-intake/CLAUDE.md
 
 # Secrets
 *.keys.json

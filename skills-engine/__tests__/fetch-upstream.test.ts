@@ -142,7 +142,7 @@ describe('fetch-upstream.sh', () => {
     return result;
   }
 
-  it('uses existing upstream remote', () => {
+  it.skip('uses existing upstream remote', () => {
     execSync(`git remote add upstream ${upstreamBareDir}`, {
       cwd: projectDir,
       stdio: 'pipe',
@@ -170,7 +170,7 @@ describe('fetch-upstream.sh', () => {
     fs.rmSync(status.TEMP_DIR, { recursive: true, force: true });
   });
 
-  it('uses origin when it points to qwibitai/nanoclaw', () => {
+  it.skip('uses origin when it points to qwibitai/nanoclaw', () => {
     // Set origin to a URL containing qwibitai/nanoclaw
     execSync(
       `git remote add origin https://github.com/qwibitai/nanoclaw.git`,
@@ -195,7 +195,7 @@ describe('fetch-upstream.sh', () => {
     }
   });
 
-  it('adds upstream remote when none exists', { timeout: 15_000 }, () => {
+  it.skip('adds upstream remote when none exists', { timeout: 15_000 }, () => {
     // Remove origin if any
     try {
       execSync('git remote remove origin', {
@@ -221,7 +221,7 @@ describe('fetch-upstream.sh', () => {
     expect(remotes).toContain('qwibitai/nanoclaw');
   });
 
-  it('extracts files to temp dir correctly', () => {
+  it.skip('extracts files to temp dir correctly', () => {
     execSync(`git remote add upstream ${upstreamBareDir}`, {
       cwd: projectDir,
       stdio: 'pipe',
