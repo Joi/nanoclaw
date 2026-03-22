@@ -88,6 +88,7 @@ vi.mock('child_process', async () => {
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
+import fs from "fs";
 
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
@@ -206,5 +207,73 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe("container-runner settings.json QMD MCP configuration", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(fs.writeFileSync).mockClear();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("includes QMD mcpServers when group has intakeAccess", () => {
+    const groupWithIntake: RegisteredGroup = {
+      ...testGroup,
+      intakeAccess: true,
+    };
+
+    // buildVolumeMounts runs synchronously before the first await
+    runContainerAgent(groupWithIntake, testInput, () => {});
+
+    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === "string" && filePath.includes("settings.json"),
+    );
+    expect(settingsCall).toBeDefined();
+    const content = JSON.parse(settingsCall![1] as string);
+    expect(content.mcpServers).toBeDefined();
+    expect(content.mcpServers.qmd).toEqual({
+      command: "/bin/sh",
+      args: ["-c", "exec socat STDIO TCP:host.docker.internal:3141"],
+    });
+  });
+
+  it("includes QMD mcpServers when group has fileServingAccess", () => {
+    const groupWithFileServing: RegisteredGroup = {
+      ...testGroup,
+      fileServingAccess: true,
+    };
+
+    runContainerAgent(groupWithFileServing, testInput, () => {});
+
+    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === "string" && filePath.includes("settings.json"),
+    );
+    expect(settingsCall).toBeDefined();
+    const content = JSON.parse(settingsCall![1] as string);
+    expect(content.mcpServers).toBeDefined();
+    expect(content.mcpServers.qmd).toEqual({
+      command: "/bin/sh",
+      args: ["-c", "exec socat STDIO TCP:host.docker.internal:3141"],
+    });
+  });
+
+  it("does not include mcpServers when group has no intake or file serving access", () => {
+    runContainerAgent(testGroup, testInput, () => {});
+
+    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === "string" && filePath.includes("settings.json"),
+    );
+    expect(settingsCall).toBeDefined();
+    const content = JSON.parse(settingsCall![1] as string);
+    expect(content.mcpServers).toBeUndefined();
   });
 });
