@@ -94,3 +94,87 @@ describe('GIDC wiring in index.ts', () => {
     });
   });
 });
+
+describe('GIDC intake pipeline wiring in index.ts', () => {
+  describe('intake imports', () => {
+    it("imports writeIntakeFile from intake.js", () => {
+      expect(indexSource).toContain("from './intake.js'");
+      expect(indexSource).toContain('writeIntakeFile');
+    });
+
+    it("imports shouldRunIntake from intake-routing.js", () => {
+      expect(indexSource).toContain("from './intake-routing.js'");
+      expect(indexSource).toContain('shouldRunIntake');
+    });
+  });
+
+  describe('GIDC intake block in onMessage', () => {
+    it("checks chatJid starts with slack:gidc:", () => {
+      expect(indexSource).toContain("chatJid.startsWith('slack:gidc:')");
+    });
+
+    it("checks group.intakeAccess", () => {
+      expect(indexSource).toContain('group.intakeAccess');
+    });
+
+    it("calls shouldRunIntake with channelMode and false", () => {
+      expect(indexSource).toContain('shouldRunIntake(group.channelMode, false)');
+    });
+
+    it("calls writeIntakeFile with confidentialRoot", () => {
+      expect(indexSource).toContain('writeIntakeFile(confidentialRoot,');
+    });
+
+    it("derives workstream from group.folder split on dash", () => {
+      expect(indexSource).toContain("group.folder.split('-')[0]");
+    });
+
+    it("derives confidentialRoot using process.env.HOME and switchboard/confidential", () => {
+      expect(indexSource).toContain("process.env.HOME || '/Users/jibot'");
+      expect(indexSource).toContain('switchboard/confidential');
+    });
+
+    it("uses try/catch with logger.warn on error in GIDC intake block", () => {
+      const intakeBlock = indexSource.match(
+        /\/\/ GIDC intake[\s\S]*?(?=\/\/ jibrain intake)/,
+      );
+      expect(intakeBlock).not.toBeNull();
+      expect(intakeBlock![0]).toContain('try {');
+      expect(intakeBlock![0]).toContain('catch');
+      expect(intakeBlock![0]).toContain('logger.warn');
+    });
+
+    it("GIDC intake block appears BEFORE jibrain intake block in onMessage", () => {
+      const gidcIntakePos = indexSource.indexOf('// GIDC intake');
+      const jibrainIntakePos = indexSource.indexOf('// jibrain intake');
+
+      expect(gidcIntakePos).toBeGreaterThan(-1);
+      expect(jibrainIntakePos).toBeGreaterThan(-1);
+      expect(gidcIntakePos).toBeLessThan(jibrainIntakePos);
+    });
+
+    it("passes author from msg.sender_name in writeIntakeFile call", () => {
+      const intakeBlock = indexSource.match(
+        /writeIntakeFile\(confidentialRoot,[\s\S]*?\}\s*\)/,
+      );
+      expect(intakeBlock).not.toBeNull();
+      expect(intakeBlock![0]).toContain('msg.sender_name');
+    });
+
+    it("passes text from msg.content in writeIntakeFile call", () => {
+      const intakeBlock = indexSource.match(
+        /writeIntakeFile\(confidentialRoot,[\s\S]*?\}\s*\)/,
+      );
+      expect(intakeBlock).not.toBeNull();
+      expect(intakeBlock![0]).toContain('msg.content');
+    });
+
+    it("passes timestamp from msg.timestamp in writeIntakeFile call", () => {
+      const intakeBlock = indexSource.match(
+        /writeIntakeFile\(confidentialRoot,[\s\S]*?\}\s*\)/,
+      );
+      expect(intakeBlock).not.toBeNull();
+      expect(intakeBlock![0]).toContain('msg.timestamp');
+    });
+  });
+});

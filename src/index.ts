@@ -80,6 +80,8 @@ import { logger } from './logger.js';
 import { checkInput, checkOutput } from './guardrails.js';
 import { writeRemindersSnapshot } from './reminders.js';
 import { startVoiceApi } from './voice-api.js';
+import { writeIntakeFile } from './intake.js';
+import { shouldRunIntake } from './intake-routing.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -766,6 +768,37 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // GIDC intake: write substantive messages to confidential workstream dirs
+      if (
+        !msg.is_from_me &&
+        !msg.is_bot_message &&
+        chatJid.startsWith('slack:gidc:') &&
+        registeredGroups[chatJid]
+      ) {
+        const group = registeredGroups[chatJid];
+        if (group.intakeAccess && shouldRunIntake(group.channelMode, false)) {
+          const workstream = group.folder.split('-')[0] || 'gidc';
+          const confidentialRoot = path.join(
+            process.env.HOME || '/Users/jibot',
+            'switchboard/confidential',
+          );
+          const channelId = chatJid.split(':')[2] || '';
+          const channelName = group.name;
+          try {
+            writeIntakeFile(confidentialRoot, {
+              author: msg.sender_name,
+              channelId,
+              channelName,
+              workstream,
+              text: msg.content,
+              timestamp: msg.timestamp,
+            });
+          } catch (err) {
+            logger.warn({ err }, 'GIDC intake write failed');
+          }
+        }
+      }
 
       // jibrain intake: write substantive messages to Syncthing-synced jibrain
       if (!msg.is_from_me && !msg.is_bot_message && msg.content.length >= 20) {
