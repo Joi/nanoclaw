@@ -133,6 +133,7 @@ export function saveSenderAllowlist(
 ): void {
   const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
   const json = JSON.stringify(cfg, null, 2) + '\n';
+  // let fs errors propagate to caller
   fs.writeFileSync(filePath, json, 'utf-8');
   logger.info({ path: filePath }, 'sender-allowlist: config saved');
 }
