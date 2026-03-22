@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
 import { parseGidcCommand } from './gidc-commands.js';
-import type { GidcCommand } from './gidc-commands.js';
 
 describe('mode command', () => {
   it('parses "mode listening" to mode command', () => {

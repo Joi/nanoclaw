@@ -85,9 +85,9 @@ export class SlackChannel implements Channel {
         file: fs.createReadStream(filePath),
         filename,
       });
-      logger.info({ jid, filename }, "Slack file uploaded");
+      logger.info({ jid, filename }, 'Slack file uploaded');
     } catch (err) {
-      logger.error({ jid, filename, err }, "Failed to upload Slack file");
+      logger.error({ jid, filename, err }, 'Failed to upload Slack file');
       throw err;
     }
   }

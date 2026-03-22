@@ -808,12 +808,13 @@ async function main(): Promise<void> {
       ) {
         const group = registeredGroups[chatJid];
         if (group.intakeAccess && shouldRunIntake(group.channelMode, false)) {
+          // folder names are prefixed with workstream (e.g. 'sankosh-intake' -> 'sankosh')
           const workstream = group.folder.split('-')[0] || 'gidc';
           const confidentialRoot = path.join(
             process.env.HOME || '/Users/jibot',
             'switchboard/confidential',
           );
-          const channelId = chatJid.split(':')[2] || '';
+          const channelId = chatJid.split(':').pop() || '';
           const channelName = group.name;
           try {
             writeIntakeFile(confidentialRoot, {
