@@ -146,11 +146,9 @@ function buildVolumeMounts(
   if (group.intakeAccess || group.fileServingAccess) {
     settingsObj.mcpServers = {
       qmd: {
-        command: '/bin/sh',
-        // socat bridges container stdio -> TCP, letting Claude Code connect to QMD
-        // as if it were a local process (MCP stdio transport over TCP to the host)
-        // QMD MCP server on jibotmac host port 7333, reached via Docker host gateway
-        args: ['-c', 'exec socat STDIO TCP:host.docker.internal:7333'],
+        // SSE transport: supergateway on jibotmac host port 7333 serves HTTP/SSE.
+        // Claude Code SDK supports url-based MCP servers natively.
+        url: `http://host.docker.internal:7333/sse`,
       },
     };
   }
