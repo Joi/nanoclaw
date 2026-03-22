@@ -13,7 +13,7 @@ export interface IntakeMessage {
   channelId: string;
   channelName: string;
   workstream: string;
-  text?: string;
+  text: string;
   timestamp: string;
   attachments?: IntakeAttachment[];
 }

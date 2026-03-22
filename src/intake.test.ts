@@ -105,8 +105,7 @@ describe('writeIntakeFile', () => {
       { originalFilename: 'document.pdf', savedPath: '/tmp/document.pdf' },
     ];
 
-    const { text: _omit, ...baseNoText } = BASE_MSG;
-    const msg: IntakeMessage = { ...baseNoText, attachments };
+    const msg: IntakeMessage = { ...BASE_MSG, text: '', attachments };
 
     writeIntakeFile(CONFIDENTIAL_ROOT, msg);
 
