@@ -245,6 +245,7 @@ describe('saveSenderAllowlist', () => {
     const loaded = loadSenderAllowlist(p);
     expect(loaded.default.allow).toEqual(['bob']);
     expect(loaded.default.mode).toBe('drop');
+    expect(loaded.logDenied).toBe(false);
   });
 
   it('creates file if it does not exist', () => {
@@ -257,5 +258,7 @@ describe('saveSenderAllowlist', () => {
     };
     saveSenderAllowlist(cfg, p);
     expect(fs.existsSync(p)).toBe(true);
+    const loaded = loadSenderAllowlist(p);
+    expect(loaded.default.allow).toBe("*");
   });
 });
