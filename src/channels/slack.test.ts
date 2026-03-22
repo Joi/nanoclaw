@@ -12,6 +12,9 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+// Hoisted mock for files.uploadV2 — accessible in both MockApp and tests
+const mockFilesUploadV2 = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
+
 // Use vi.hoisted to capture app instances created inside the constructor
 const appRef = vi.hoisted(() => ({ current: null as any }));
 
@@ -35,6 +38,9 @@ vi.mock('@slack/bolt', () => {
             name: 'testuser',
           },
         }),
+      },
+      files: {
+        uploadV2: mockFilesUploadV2,
       },
     };
 
@@ -445,6 +451,57 @@ describe('SlackChannel', () => {
       await expect(
         channel.sendMessage('slack:UABC123', 'Hello'),
       ).rejects.toThrow('Failed to open DM with UABC123');
+    });
+  });
+
+  // --- sendFile ---
+
+  describe('sendFile', () => {
+    it('uploads a file to a channel JID', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+      const app = currentApp();
+      await channel.connect();
+
+      await channel.sendFile('slack:gidc:channel:C67890DEF', 'report.pdf', Buffer.from('content'));
+
+      expect(mockFilesUploadV2).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel_id: 'C67890DEF',
+          filename: 'report.pdf',
+        }),
+      );
+    });
+
+    it('uploads a file to a DM JID', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+      const app = currentApp();
+      app.client.conversations.open.mockResolvedValueOnce({
+        channel: { id: 'D_DM_CHAN' },
+      });
+      await channel.connect();
+
+      await channel.sendFile('slack:gidc:UGIDC456', 'doc.txt', Buffer.from('content'));
+
+      expect(app.client.conversations.open).toHaveBeenCalledWith({
+        users: 'UGIDC456',
+      });
+      expect(mockFilesUploadV2).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel_id: 'D_DM_CHAN',
+          filename: 'doc.txt',
+        }),
+      );
+    });
+
+    it('throws on upload failure', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+      const app = currentApp();
+      mockFilesUploadV2.mockRejectedValueOnce(new Error('upload_failed'));
+      await channel.connect();
+
+      await expect(
+        channel.sendFile('slack:gidc:channel:C67890DEF', 'report.pdf', Buffer.from('content')),
+      ).rejects.toThrow('upload_failed');
     });
   });
 });
