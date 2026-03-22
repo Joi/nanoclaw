@@ -19,6 +19,10 @@ import {
   SLACK_2_BOT_TOKEN,
   SLACK_2_NAMESPACE,
   SLACK_2_SIGNING_SECRET,
+  SLACK_3_APP_TOKEN,
+  SLACK_3_BOT_TOKEN,
+  SLACK_3_NAMESPACE,
+  SLACK_3_SIGNING_SECRET,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_ONLY,
   TIMEZONE,
@@ -864,6 +868,25 @@ async function main(): Promise<void> {
       logger.info({ namespace: SLACK_2_NAMESPACE }, 'Slack 2 channel connected');
     } catch (err) {
       logger.error({ err, namespace: SLACK_2_NAMESPACE }, 'Failed to connect Slack 2 channel');
+    }
+  }
+
+  // Third Slack workspace — GIDC (if configured)
+  // No onNewContact — contacts linked manually
+  if (SLACK_3_BOT_TOKEN && SLACK_3_APP_TOKEN && SLACK_3_NAMESPACE) {
+    const slack3 = new SlackChannel({
+      ...channelOpts,
+      slackBotToken: SLACK_3_BOT_TOKEN,
+      slackAppToken: SLACK_3_APP_TOKEN,
+      slackSigningSecret: SLACK_3_SIGNING_SECRET,
+      namespace: SLACK_3_NAMESPACE,
+    });
+    channels.push(slack3);
+    try {
+      await slack3.connect();
+      logger.info({ namespace: SLACK_3_NAMESPACE }, 'Slack 3 channel connected');
+    } catch (err) {
+      logger.error({ err, namespace: SLACK_3_NAMESPACE }, 'Failed to connect Slack 3 channel');
     }
   }
 
