@@ -15,10 +15,18 @@ vi.mock('../logger.js', () => ({
 // Hoisted mock for files.uploadV2 — accessible in both MockApp and tests
 const mockFilesUploadV2 = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
 
+// Hoisted mock for fs.createReadStream — shared between default and named exports
+const mockCreateReadStream = vi.hoisted(() => vi.fn().mockReturnValue({}));
+
 // Use vi.hoisted to capture app instances created inside the constructor
 const appRef = vi.hoisted(() => ({ current: null as any }));
 
-vi.mock('fs', () => ({  default: {    createReadStream: vi.fn().mockReturnValue({}),  },  createReadStream: vi.fn().mockReturnValue({}),}));
+vi.mock('fs', () => ({
+  default: {
+    createReadStream: mockCreateReadStream,
+  },
+  createReadStream: mockCreateReadStream,
+}));
 vi.mock('@slack/bolt', () => {
   class MockApp {
     client = {
@@ -462,6 +470,7 @@ describe('SlackChannel', () => {
 
       await channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf');
 
+      expect(mockCreateReadStream).toHaveBeenCalledWith('/tmp/report.pdf');
       expect(mockFilesUploadV2).toHaveBeenCalledWith(
         expect.objectContaining({
           channel_id: 'C67890DEF',
@@ -480,6 +489,7 @@ describe('SlackChannel', () => {
 
       await channel.sendFile('slack:gidc:UGIDC456', '/tmp/doc.txt', 'doc.txt');
 
+      expect(mockCreateReadStream).toHaveBeenCalledWith('/tmp/doc.txt');
       expect(app.client.conversations.open).toHaveBeenCalledWith({
         users: 'UGIDC456',
       });
@@ -499,6 +509,8 @@ describe('SlackChannel', () => {
       await expect(
         channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf'),
       ).rejects.toThrow('upload_failed');
+
+      expect(mockCreateReadStream).toHaveBeenCalledWith('/tmp/report.pdf');
     });
   });
 });
