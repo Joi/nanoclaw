@@ -67,7 +67,7 @@ Confidential workstream files are mounted at:
 - `/workspace/extra/confidential/sankosh/` — Sankosh workstream confidential files
 - `/workspace/extra/confidential/bhutan/` — Bhutan workstream confidential files
 
-These paths are read-only for staff tier. Intake writes go to the intake workstream directory only.
+These paths are read-write for intake and admin operations.
 
 ## Communication Style
 
