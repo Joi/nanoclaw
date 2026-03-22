@@ -1,4 +1,5 @@
 import { App, LogLevel } from '@slack/bolt';
+import fs from 'fs';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
 
@@ -76,12 +77,12 @@ export class SlackChannel implements Channel {
   }
 
 
-  async sendFile(jid: string, filename: string, file: Buffer | NodeJS.ReadStream): Promise<void> {
+  async sendFile(jid: string, filePath: string, filename: string): Promise<void> {
     const channelId = await this.resolveChannelId(jid);
     try {
-      await this.app.client.files.uploadV2({
+      await this.app.client.filesUploadV2({
         channel_id: channelId,
-        file,
+        file: fs.createReadStream(filePath),
         filename,
       });
       logger.info({ jid, filename }, "Slack file uploaded");

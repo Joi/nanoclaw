@@ -18,6 +18,7 @@ const mockFilesUploadV2 = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true 
 // Use vi.hoisted to capture app instances created inside the constructor
 const appRef = vi.hoisted(() => ({ current: null as any }));
 
+vi.mock('fs', () => ({  default: {    createReadStream: vi.fn().mockReturnValue({}),  },  createReadStream: vi.fn().mockReturnValue({}),}));
 vi.mock('@slack/bolt', () => {
   class MockApp {
     client = {
@@ -39,9 +40,7 @@ vi.mock('@slack/bolt', () => {
           },
         }),
       },
-      files: {
-        uploadV2: mockFilesUploadV2,
-      },
+      filesUploadV2: mockFilesUploadV2,
     };
 
     start = vi.fn().mockResolvedValue(undefined);
@@ -461,7 +460,7 @@ describe('SlackChannel', () => {
       const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
       await channel.connect();
 
-      await channel.sendFile('slack:gidc:channel:C67890DEF', 'report.pdf', Buffer.from('content'));
+      await channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf');
 
       expect(mockFilesUploadV2).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -479,7 +478,7 @@ describe('SlackChannel', () => {
       });
       await channel.connect();
 
-      await channel.sendFile('slack:gidc:UGIDC456', 'doc.txt', Buffer.from('content'));
+      await channel.sendFile('slack:gidc:UGIDC456', '/tmp/doc.txt', 'doc.txt');
 
       expect(app.client.conversations.open).toHaveBeenCalledWith({
         users: 'UGIDC456',
@@ -498,7 +497,7 @@ describe('SlackChannel', () => {
       await channel.connect();
 
       await expect(
-        channel.sendFile('slack:gidc:channel:C67890DEF', 'report.pdf', Buffer.from('content')),
+        channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf'),
       ).rejects.toThrow('upload_failed');
     });
   });
