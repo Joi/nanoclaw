@@ -329,8 +329,6 @@ export async function runContainerAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
-  const hasCalendar = input.calendarAccess ?? false;
-
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
@@ -343,6 +341,7 @@ export async function runContainerAgent(
     {
       group: group.name,
       containerName,
+      calendarAccess: input.calendarAccess ?? false,
       mounts: mounts.map(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
