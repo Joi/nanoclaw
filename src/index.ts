@@ -80,6 +80,7 @@ import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { checkInput, checkOutput } from './guardrails.js';
 import { writeRemindersSnapshot } from './reminders.js';
+import { writeUsersSnapshot } from './user-snapshot.js';
 import { startVoiceApi } from './voice-api.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
@@ -583,6 +584,11 @@ async function runAgent(
   // Write reminders snapshot if this group has access
   if (group.remindersAccess) {
     writeRemindersSnapshot(group.folder);
+  }
+
+  // Write users snapshot for admin groups (calendarAccess || remindersAccess)
+  if (group.calendarAccess || group.remindersAccess) {
+    writeUsersSnapshot(group.folder, registeredGroups, 'gidc');
   }
 
   // Wrap onOutput to track session ID from streamed results
