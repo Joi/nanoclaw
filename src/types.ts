@@ -43,6 +43,10 @@ export interface RegisteredGroup {
   bookmarksAccess?: boolean; // If true, group gets bookmark extraction tools
   emailAccess?: boolean; // If true, group gets email send/contacts tools
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
+  calendarAccess?: boolean; // If true, group gets gog calendar tools
+  fileServingAccess?: boolean; // If true, group can serve files via Slack upload
+  intakeAccess?: boolean; // If true, group can write intake files to workstream dirs
+  channelMode?: 'listening' | 'available'; // listening = passive intake, available = respond-only
 }
 
 export interface NewMessage {
