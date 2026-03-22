@@ -126,3 +126,13 @@ export function isTriggerAllowed(
   }
   return allowed;
 }
+
+export function saveSenderAllowlist(
+  cfg: SenderAllowlistConfig,
+  pathOverride?: string,
+): void {
+  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
+  const json = JSON.stringify(cfg, null, 2) + '\n';
+  fs.writeFileSync(filePath, json, 'utf-8');
+  logger.info({ path: filePath }, 'sender-allowlist: config saved');
+}

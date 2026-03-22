@@ -7,6 +7,7 @@ import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
+  saveSenderAllowlist,
   SenderAllowlistConfig,
   shouldDropMessage,
 } from './sender-allowlist.js';
@@ -212,5 +213,49 @@ describe('isTriggerAllowed', () => {
     };
     isTriggerAllowed('g1', 'eve', cfg);
     // Logger.debug is called — we just verify no crash; logger is a real pino instance
+  });
+});
+
+describe('saveSenderAllowlist', () => {
+  it('writes config back to file', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: ['alice'], mode: 'trigger' },
+      chats: { g1: { allow: '*', mode: 'drop' } },
+      logDenied: false,
+    };
+    const p = cfgPath('saved.json');
+    saveSenderAllowlist(cfg, p);
+    const loaded = loadSenderAllowlist(p);
+    expect(loaded.default.allow).toEqual(['alice']);
+    expect(loaded.chats['g1'].allow).toBe('*');
+    expect(loaded.logDenied).toBe(false);
+  });
+
+  it('overwrites existing file', () => {
+    const p = writeConfig(
+      { default: { allow: '*', mode: 'trigger' }, chats: {}, logDenied: true },
+      'overwrite.json',
+    );
+    const newCfg: SenderAllowlistConfig = {
+      default: { allow: ['bob'], mode: 'drop' },
+      chats: {},
+      logDenied: false,
+    };
+    saveSenderAllowlist(newCfg, p);
+    const loaded = loadSenderAllowlist(p);
+    expect(loaded.default.allow).toEqual(['bob']);
+    expect(loaded.default.mode).toBe('drop');
+  });
+
+  it('creates file if it does not exist', () => {
+    const p = cfgPath('new-file.json');
+    expect(fs.existsSync(p)).toBe(false);
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+    };
+    saveSenderAllowlist(cfg, p);
+    expect(fs.existsSync(p)).toBe(true);
   });
 });
