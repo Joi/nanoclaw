@@ -398,8 +398,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // GIDC @gibot commands: handle mode and scan before running the agent
   if (chatJid.startsWith('slack:gidc:') && missedMessages.length === 1) {
-    const lastMsg = missedMessages[0];
-    const cmd = parseGidcCommand(lastMsg.content);
+    const msg = missedMessages[0];
+    const cmd = parseGidcCommand(msg.content);
     if (cmd) {
       if (cmd.type === 'mode') {
         group.channelMode = cmd.value;
@@ -415,7 +415,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         await channel.sendMessage(chatJid, 'Starting QMD re-index scan...');
         execFile('qmd', ['index', '--all'], (err) => {
           if (err) {
-            channel.sendMessage(chatJid, `QMD scan failed: ${err.message}`).catch(() => {});
+            channel.sendMessage(chatJid, `QMD scan failed: ${err.message}`).catch((e) => logger.warn({ chatJid, err: e }, 'Failed to send QMD scan error'));
           } else {
             channel.sendMessage(chatJid, 'QMD re-index scan complete.').catch(() => {});
           }
