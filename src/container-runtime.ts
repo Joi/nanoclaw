@@ -41,12 +41,11 @@ function detectProxyBindHost(): string {
 }
 
 /** CLI args needed for the container to resolve the host gateway. */
+/** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
-  // On Linux, host.docker.internal isn't built-in — add it explicitly
-  if (os.platform() === 'linux') {
-    return ['--add-host=host.docker.internal:host-gateway'];
-  }
-  return [];
+  // Always add host.docker.internal mapping.
+  // Docker Desktop (macOS) ignores this harmlessly; Colima and Linux need it.
+  return ["--add-host=host.docker.internal:host-gateway"];
 }
 
 /** Returns CLI args for a readonly bind mount. */

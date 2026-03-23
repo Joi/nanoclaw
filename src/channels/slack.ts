@@ -1,7 +1,17 @@
 import { App, LogLevel } from '@slack/bolt';
+import { PDFParse } from 'pdf-parse';
 import fs from 'fs';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
+
+
+
+
+
+/** Max file size to download (10 MB) */
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+/** Max extracted text length per file (chars) */
+const MAX_TEXT_CHARS = 80_000;
 
 export interface SlackChannelOpts {
   onMessage: OnInboundMessage;
@@ -16,6 +26,15 @@ export interface SlackChannelOpts {
   /** Persist state across restarts (key-value store backed by SQLite) */
   getState?: (key: string) => string | undefined;
   setState?: (key: string, value: string) => void;
+}
+
+interface SlackFile {
+  name: string;
+  url_private_download?: string;
+  url_private?: string;
+  mimetype?: string;
+  filetype?: string;
+  size?: number;
 }
 
 export class SlackChannel implements Channel {
@@ -228,14 +247,12 @@ export class SlackChannel implements Channel {
       const senderName = await this.resolveUserName(userId);
       const isDm = !isChannel;
 
-      // Build content: include file names if present
+      // Build content: text + extracted file contents
       let content = msg.text || '';
-      const files = (msg as any).files as Array<{ name: string; url_private: string }> | undefined;
+      const files = (msg as any).files as SlackFile[] | undefined;
       if (files && files.length > 0) {
-        const fileList = files.map(f => f.name).join(', ');
-        content = content
-          ? `${content}\n[Attached files: ${fileList}]`
-          : `[Attached files: ${fileList}]`;
+        const extracted = await this.downloadAndExtractFiles(files);
+        content = content ? `${content}\n${extracted}` : extracted;
       }
 
       const cleanText = isDm ? content : this.stripBotMention(content);
@@ -275,6 +292,94 @@ export class SlackChannel implements Channel {
     );
 
     return messages.length;
+  }
+
+  // --- File download and extraction ---
+
+  /**
+   * Download Slack files and extract text content.
+   * PDFs: full text extraction via pdf-parse.
+   * Other files: filename + type noted.
+   * Returns a formatted string to append to the message content.
+   */
+  private async downloadAndExtractFiles(files: SlackFile[]): Promise<string> {
+    const parts: string[] = [];
+
+    for (const file of files) {
+      const url = file.url_private_download || file.url_private;
+      if (!url) {
+        parts.push(`[Attached: ${file.name}]`);
+        continue;
+      }
+
+      // Size guard
+      if (file.size && file.size > MAX_FILE_BYTES) {
+        parts.push(`[Attached: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB — too large to extract)]`);
+        continue;
+      }
+
+      const isPdf = file.mimetype === 'application/pdf' || file.filetype === 'pdf';
+
+      if (!isPdf) {
+        // For non-PDF files, just note the filename
+        parts.push(`[Attached: ${file.name} (${file.mimetype || file.filetype || 'unknown type'})]`);
+        continue;
+      }
+
+      // Download the PDF
+      try {
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${this.opts.slackBotToken}` },
+        });
+
+        if (!response.ok) {
+          logger.warn({ file: file.name, status: response.status }, 'Failed to download Slack file');
+          parts.push(`[Attached: ${file.name} — download failed (${response.status})]`);
+          continue;
+        }
+
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        // Extract text
+        try {
+          const parser = new PDFParse({ data: new Uint8Array(buffer), verbosity: 0 });
+          const textResult = await parser.getText();
+          let text = textResult.text.trim();
+          const info = await parser.getInfo();
+          const numpages = info?.total ?? textResult.total ?? 0;
+          await parser.destroy();
+
+          if (text.length === 0) {
+            parts.push(`[Attached: ${file.name} — PDF contains no extractable text (scanned/image PDF)]`);
+            continue;
+          }
+
+          // Truncate very long PDFs
+          if (text.length > MAX_TEXT_CHARS) {
+            text = text.slice(0, MAX_TEXT_CHARS) + `\n[... truncated, ${numpages} pages total ...]`;
+          }
+
+          parts.push(
+            `\n--- Content of ${file.name} (${numpages} pages) ---\n` +
+            text +
+            `\n--- End of ${file.name} ---`,
+          );
+
+          logger.info(
+            { file: file.name, pages: numpages, textLen: text.length },
+            'Extracted text from PDF attachment',
+          );
+        } catch (pdfErr) {
+          logger.warn({ file: file.name, err: pdfErr }, 'PDF text extraction failed');
+          parts.push(`[Attached: ${file.name} — PDF extraction error]`);
+        }
+      } catch (err) {
+        logger.warn({ file: file.name, err }, 'Failed to download Slack file');
+        parts.push(`[Attached: ${file.name} — download error]`);
+      }
+    }
+
+    return parts.join('\n');
   }
 
   // --- Private helpers ---
@@ -352,14 +457,12 @@ export class SlackChannel implements Channel {
       const timestamp = this.slackTsToIso(ts);
       const msgId = `slack_${ts}_${userId}`;
 
-      // Build content: include file names if present
+      // Build content: text + extracted file contents
       let content = text;
-      const files = msg.files as Array<{ name: string; url_private: string }> | undefined;
+      const files = msg.files as SlackFile[] | undefined;
       if (files && files.length > 0) {
-        const fileList = files.map(f => f.name).join(', ');
-        content = content
-          ? `${content}\n[Attached files: ${fileList}]`
-          : `[Attached files: ${fileList}]`;
+        const extracted = await this.downloadAndExtractFiles(files);
+        content = content ? `${content}\n${extracted}` : extracted;
       }
 
       // Strip bot mention from channel messages (e.g. "<@U123ABC> hello" -> "@jibot hello")
@@ -393,8 +496,7 @@ export class SlackChannel implements Channel {
 
       // Update last-seen timestamp for this channel (for history catchup)
       if (this.opts.setState) {
-        const slackChannelId = isDm ? channelId : channelId;
-        const stateKey = `${this.name}_last_ts:${slackChannelId}`;
+        const stateKey = `${this.name}_last_ts:${channelId}`;
         this.opts.setState(stateKey, ts);
       }
     });
