@@ -239,6 +239,23 @@ function buildVolumeMounts(
     });
   }
 
+  // Confidential workstream data (PDFs, PPTXs, etc.) for groups with intakeAccess
+  // Mounted read-only so agents can read and send files but not modify them
+  if (group.intakeAccess) {
+    const confidentialDir = path.join(
+      process.env.HOME || os.homedir(),
+      "switchboard",
+      "confidential",
+    );
+    if (fs.existsSync(confidentialDir)) {
+      mounts.push({
+        hostPath: confidentialDir,
+        containerPath: "/workspace/confidential",
+        readonly: true,
+      });
+    }
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(

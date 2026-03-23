@@ -205,7 +205,7 @@ export class SlackChannel implements Channel {
   private stripBotMention(text: string): string {
     if (!this.botUserId) return text;
     // Slack mentions look like <@U01ABC123>
-    return text.replace(new RegExp(`<@${this.botUserId}>\\s*`, 'g'), '').trim();
+    return text.replace(new RegExp(`<@${this.botUserId}>\\s*`, "g"), "@jibot ").trim();
   }
 
   private slackTsToIso(ts: string): string {

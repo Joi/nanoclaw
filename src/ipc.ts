@@ -15,6 +15,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendFile: (jid: string, filePath: string, filename: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -92,6 +93,37 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (data.type === "file" && data.chatJid && data.hostPath && data.filename) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  // Security: only allow files from approved base paths
+                  const resolvedPath = path.resolve(data.hostPath as string);
+                  const allowedBases = [
+                    "/Users/jibot/switchboard/confidential/",
+                    "/Users/jibot/nanoclaw/groups/",
+                  ];
+                  const isAllowed = allowedBases.some((base) => resolvedPath.startsWith(base));
+                  if (isAllowed && fs.existsSync(resolvedPath)) {
+                    await deps.sendFile(data.chatJid, resolvedPath, data.filename as string);
+                    logger.info(
+                      { chatJid: data.chatJid, filename: data.filename, sourceGroup },
+                      "IPC file sent",
+                    );
+                  } else {
+                    logger.warn(
+                      { hostPath: data.hostPath, sourceGroup },
+                      "IPC file request blocked: path not allowed or not found",
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    "Unauthorized IPC file attempt blocked",
                   );
                 }
               }

@@ -51,3 +51,35 @@ Commands that REQUIRE explicit user approval:
 gog CLI is authenticated as jibot@ito.com, but Joi s data lives under joi@ito.com.
 - Calendar: ALWAYS use `joi@ito.com` as calendar ID, never "primary"
 - Gmail: ALWAYS use `--account jibot@ito.com`
+
+## Output Formatting (Slack mrkdwn)
+
+Your output is rendered in Slack, which uses its own "mrkdwn" format — NOT standard markdown. Standard markdown headers, bold, tables, and code blocks will appear as raw text.
+
+**Slack mrkdwn rules:**
+- Bold: `*bold*` (single asterisk, NOT double)
+- Italic: `_italic_` (underscore)
+- Strikethrough: `~struck~`
+- Code inline: backtick (same as markdown)
+- Code block: triple backtick (same as markdown)
+- Bulleted list: `• item` or `- item`
+- Blockquote: `> quote`
+- Link: `<https://example.com|display text>`
+
+**What does NOT work in Slack:**
+- `## Headers` — renders as literal `##`. Use `*Bold Text*` on its own line instead.
+- `**double asterisk bold**` — renders as literal `**`. Use single `*bold*`.
+- `| table | syntax |` — no table support. Use bulleted lists or indented text.
+- `[link text](url)` — use `<url|text>` instead.
+
+**Formatting pattern for structured output:**
+```
+*Section Title*
+• Key point one
+• Key point two: value
+
+*Another Section*
+• Detail: explanation
+```
+
+Always format your responses using Slack mrkdwn, never standard markdown.
