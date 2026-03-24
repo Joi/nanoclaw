@@ -146,10 +146,10 @@ function buildVolumeMounts(
   if (group.intakeAccess || group.fileServingAccess) {
     settingsObj.mcpServers = {
       qmd: {
-        // Streamable HTTP transport: supergateway on jibotmac host port 7333.
-        // Claude Code SDK supports url-based MCP servers natively.
-        type: "http",
-        url: `http://host.docker.internal:7333/mcp`,
+        // QMD runs inside the container as a stdio MCP server.
+        // The confidential SQLite index is bind-mounted from the host.
+        command: "qmd",
+        args: ["--index", "confidential", "mcp"],
       },
     };
   }
@@ -254,6 +254,38 @@ function buildVolumeMounts(
         containerPath: "/workspace/confidential",
         readonly: true,
       });
+    }
+
+    // Mount the QMD confidential index (SQLite DB) so the in-container
+    // QMD MCP server can search documents without needing supergateway.
+    // WAL is checkpointed before each mount; the copy lives in a staging dir.
+    const qmdSrcDb = path.join(
+      process.env.HOME || os.homedir(),
+      ".cache", "qmd", "confidential.sqlite",
+    );
+    const qmdStaging = path.join(
+      process.env.HOME || os.homedir(),
+      ".cache", "qmd", "container-staging",
+    );
+    if (fs.existsSync(qmdSrcDb)) {
+      fs.mkdirSync(qmdStaging, { recursive: true });
+      const qmdDstDb = path.join(qmdStaging, "confidential.sqlite");
+      // Checkpoint WAL and copy to staging (atomic for readers)
+      try {
+        require("child_process").execSync(
+          `sqlite3 "${qmdSrcDb}" "PRAGMA wal_checkpoint(TRUNCATE);" && cp -f "${qmdSrcDb}" "${qmdDstDb}"`,
+        );
+      } catch {
+        // If checkpoint fails, copy whatever we have
+        try { fs.copyFileSync(qmdSrcDb, qmdDstDb); } catch {}
+      }
+      if (fs.existsSync(qmdDstDb)) {
+        mounts.push({
+          hostPath: qmdStaging,
+          containerPath: "/home/node/.cache/qmd",
+          readonly: false, // SQLite needs write for WAL even in read mode
+        });
+      }
     }
   }
 

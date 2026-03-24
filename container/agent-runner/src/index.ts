@@ -432,8 +432,8 @@ async function runQuery(
           },
         },
         qmd: {
-          type: 'http' as const,
-          url: 'http://host.docker.internal:7333/mcp',
+          command: 'qmd',
+          args: ['--index', 'confidential', 'mcp'],
         },
       },
       hooks: {
