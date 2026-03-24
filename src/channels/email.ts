@@ -6,10 +6,13 @@
  */
 
 import { execFile } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { promisify } from 'util';
 
 import {
   BOOKMARK_RELAY_URL,
+  DATA_DIR,
   EMAIL_INTAKE_ACCOUNT,
   EMAIL_INTAKE_FROM_FILTER,
   EMAIL_INTAKE_POLL_INTERVAL,
@@ -73,20 +76,39 @@ interface GogThreadDetail {
   };
 }
 
+interface GogPartDetail {
+  mimeType?: string;
+  filename?: string;
+  body?: { data?: string; attachmentId?: string; size?: number };
+  parts?: GogPartDetail[];
+}
+
 interface GogMessageDetail {
   id: string;
   internalDate?: string;
   payload?: {
     body?: { data?: string };
     headers?: Array<{ name: string; value: string }>;
-    parts?: Array<{
-      mimeType?: string;
-      body?: { data?: string };
-      parts?: Array<{ mimeType?: string; body?: { data?: string } }>;
-    }>;
+    parts?: GogPartDetail[];
   };
   body?: string;
   snippet?: string;
+}
+
+interface AttachmentInfo {
+  messageId: string;
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+}
+
+interface DownloadedAttachment {
+  filename: string;
+  hostPath: string;
+  containerPath: string;
+  mimeType: string;
+  size: number;
 }
 
 interface ReplyContext {
@@ -249,6 +271,18 @@ export class EmailChannel implements Channel {
     // Parse all messages in thread
     const parsed = messages.map((m) => this.parseMessage(m));
 
+    // Collect all attachments across the thread (deduplicate by filename)
+    const allAttachments: AttachmentInfo[] = [];
+    const seenFilenames = new Set<string>();
+    for (const m of parsed) {
+      for (const att of m.attachments) {
+        if (!seenFilenames.has(att.filename)) {
+          seenFilenames.add(att.filename);
+          allAttachments.push(att);
+        }
+      }
+    }
+
     // Classify based on the newest message (last in array)
     const newest = parsed[parsed.length - 1];
     const latestMessage = messages[messages.length - 1];
@@ -260,9 +294,17 @@ export class EmailChannel implements Channel {
       classification = 'agent';
       logger.info({ threadId: thread.id, subject }, 'Email channel: ws: tag in subject, forcing agent classification');
     }
+    // Override: if email has attachments, always route to agent (never bookmark)
+    if (classification === 'bookmark' && allAttachments.length > 0) {
+      classification = 'agent';
+      logger.info(
+        { threadId: thread.id, attachmentCount: allAttachments.length },
+        'Email channel: has attachments, forcing agent classification',
+      );
+    }
 
     logger.info(
-      { threadId: thread.id, subject, classification, messageCount: messages.length },
+      { threadId: thread.id, subject, classification, messageCount: messages.length, attachmentCount: allAttachments.length },
       'Email channel: classified thread',
     );
 
@@ -292,8 +334,11 @@ export class EmailChannel implements Channel {
         ? new Date(newest.date).toISOString()
         : new Date().toISOString();
 
-      // Format full thread as message content
-      const content = this.formatThread(parsed, subject);
+      // Download attachments to the email group's IPC input directory
+      const downloaded = await this.downloadAttachments(allAttachments, 'email-joi');
+
+      // Format full thread as message content (with attachment info)
+      const content = this.formatThread(parsed, subject, downloaded);
 
       // Store reply context for reply-all
       this.replyContext.set(chatJid, {
@@ -346,6 +391,7 @@ export class EmailChannel implements Channel {
     date: string;
     body: string;
     rfc822MessageId: string;
+    attachments: AttachmentInfo[];
   } {
     const headers: Record<string, string> = {};
     for (const h of msg.payload?.headers || []) {
@@ -357,6 +403,28 @@ export class EmailChannel implements Channel {
       body = body.slice(0, MAX_BODY_LENGTH) + '\n[... truncated]';
     }
 
+    // Extract attachment metadata from MIME parts
+    const attachments: AttachmentInfo[] = [];
+    const collectAttachments = (parts: GogPartDetail[] | undefined) => {
+      if (!parts) return;
+      for (const part of parts) {
+        if (part.filename && part.body?.attachmentId) {
+          attachments.push({
+            messageId: msg.id,
+            attachmentId: part.body.attachmentId,
+            filename: part.filename,
+            mimeType: part.mimeType || 'application/octet-stream',
+            size: part.body.size || 0,
+          });
+        }
+        // Recurse into nested parts (multipart/mixed inside multipart/alternative)
+        if (part.parts) {
+          collectAttachments(part.parts);
+        }
+      }
+    };
+    collectAttachments(msg.payload?.parts);
+
     return {
       from: headers['From'] || '',
       to: headers['To'] || '',
@@ -365,12 +433,14 @@ export class EmailChannel implements Channel {
       date: headers['Date'] || '',
       body,
       rfc822MessageId: headers['Message-ID'] || headers['Message-Id'] || '',
+      attachments,
     };
   }
 
   private formatThread(
-    messages: Array<{ from: string; to: string; cc: string; subject: string; date: string; body: string; rfc822MessageId: string }>,
+    messages: Array<{ from: string; to: string; cc: string; subject: string; date: string; body: string; rfc822MessageId: string; attachments: AttachmentInfo[] }>,
     subject: string,
+    downloadedAttachments: DownloadedAttachment[],
   ): string {
     const participants = new Set<string>();
     for (const m of messages) {
@@ -392,6 +462,17 @@ export class EmailChannel implements Channel {
     if (mailAppLink) {
       lines.push(`Mail.app link: ${mailAppLink}`);
     }
+
+    // Include attachment info so the agent knows about downloaded files
+    if (downloadedAttachments.length > 0) {
+      lines.push('');
+      lines.push(`Attachments (${downloadedAttachments.length} files downloaded to /workspace/ipc/input/):`);
+      for (const att of downloadedAttachments) {
+        const sizeMB = (att.size / (1024 * 1024)).toFixed(1);
+        lines.push(`  - ${att.filename} (${att.mimeType}, ${sizeMB} MB) → ${att.containerPath}`);
+      }
+    }
+
     lines.push('');
 
     for (const m of messages) {
@@ -401,6 +482,66 @@ export class EmailChannel implements Channel {
     }
 
     return lines.join('\n');
+  }
+
+  // --- Attachment downloading ---
+
+  private async downloadAttachments(
+    attachments: AttachmentInfo[],
+    groupFolder: string,
+  ): Promise<DownloadedAttachment[]> {
+    if (attachments.length === 0) return [];
+
+    // Download to the group's IPC input directory (mounted at /workspace/ipc/input/ in container)
+    const inputDir = path.resolve(DATA_DIR, 'ipc', groupFolder, 'input');
+    fs.mkdirSync(inputDir, { recursive: true });
+
+    const downloaded: DownloadedAttachment[] = [];
+
+    for (const att of attachments) {
+      try {
+        const outPath = path.join(inputDir, att.filename);
+        await this.callGog([
+          'gmail', 'attachment', att.messageId, att.attachmentId,
+          '--account', EMAIL_INTAKE_ACCOUNT,
+          '--out', inputDir,
+          '--name', att.filename,
+        ]);
+
+        // Verify the file was actually written
+        if (fs.existsSync(outPath)) {
+          downloaded.push({
+            filename: att.filename,
+            hostPath: outPath,
+            containerPath: `/workspace/ipc/input/${att.filename}`,
+            mimeType: att.mimeType,
+            size: att.size,
+          });
+          logger.info(
+            { filename: att.filename, size: att.size, path: outPath },
+            'Email channel: downloaded attachment',
+          );
+        } else {
+          logger.warn(
+            { filename: att.filename, messageId: att.messageId },
+            'Email channel: attachment download produced no file',
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error(
+          { filename: att.filename, messageId: att.messageId, error: msg },
+          'Email channel: failed to download attachment',
+        );
+      }
+    }
+
+    logger.info(
+      { total: attachments.length, downloaded: downloaded.length },
+      'Email channel: attachment download complete',
+    );
+
+    return downloaded;
   }
 
   // --- Classification ---
