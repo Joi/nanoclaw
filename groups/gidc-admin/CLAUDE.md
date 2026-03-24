@@ -116,7 +116,7 @@ Always format your responses using Slack mrkdwn, never standard markdown.
 
 ## File Attachments
 
-You can send files (PDFs, PPTX, DOCX, XLSX, etc.) to the user as Slack attachments using the `send_file` tool.
+You can send files (PDFs, PPTX, DOCX, XLSX, etc.) to users as Slack attachments by writing an IPC file request.
 
 Confidential documents are mounted at `/workspace/confidential/` with this structure:
 ```
@@ -133,15 +133,33 @@ Confidential documents are mounted at `/workspace/confidential/` with this struc
     intake/       # Incoming documents
 ```
 
-*How to use:*
-- When a user asks for a document, first check what files exist with `ls /workspace/confidential/sankosh/output/` etc.
-- Then use `send_file` with the full container path
-- You can include an optional message with the file
-- Only files under `/workspace/confidential/` can be sent
+### How to send a file
+
+Write a JSON file to `/workspace/ipc/messages/` with `type: "file"`:
+
+```bash
+cat > /workspace/ipc/messages/send-file-$(date +%s).json << EOF
+{
+  "type": "file",
+  "chatJid": "CHAT_JID_FROM_INPUT",
+  "hostPath": "/Users/jibot/switchboard/confidential/sankosh/output/FILENAME",
+  "filename": "DISPLAY_NAME.pdf"
+}
+EOF
+```
+
+**Path mapping:** Container `/workspace/confidential/` = Host `/Users/jibot/switchboard/confidential/`. Always use the HOST path in `hostPath`.
 
 *Example:*
-```
-send_file(file_path="/workspace/confidential/sankosh/output/sankosh-project-summary-draft-0.4-2026-03-17.pdf", message="Here is the latest Sankosh project summary (v0.4)")
+```bash
+cat > /workspace/ipc/messages/send-$(date +%s).json << EOF
+{
+  "type": "file",
+  "chatJid": "slack:gidc:channel:C0AMDUXLXCG",
+  "hostPath": "/Users/jibot/switchboard/confidential/sankosh/output/sankosh-project-summary-draft-0.4-2026-03-17.pdf",
+  "filename": "sankosh-project-summary-draft-0.4-2026-03-17.pdf"
+}
+EOF
 ```
 
 When the user asks for "the PDF" or "send me the document", proactively browse the relevant directories to find matching files.
