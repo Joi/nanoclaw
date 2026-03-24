@@ -1,6 +1,7 @@
 import { App, LogLevel } from '@slack/bolt';
 import { PDFParse } from 'pdf-parse';
 import fs from 'fs';
+import path from 'path';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
 
@@ -251,7 +252,8 @@ export class SlackChannel implements Channel {
       let content = msg.text || '';
       const files = (msg as any).files as SlackFile[] | undefined;
       if (files && files.length > 0) {
-        const extracted = await this.downloadAndExtractFiles(files);
+        const groupName = this.opts.registeredGroups()[jid]?.name;
+        const extracted = await this.downloadAndExtractFiles(files, groupName);
         content = content ? `${content}\n${extracted}` : extracted;
       }
 
@@ -297,13 +299,31 @@ export class SlackChannel implements Channel {
   // --- File download and extraction ---
 
   /**
-   * Download Slack files and extract text content.
-   * PDFs: full text extraction via pdf-parse.
-   * Other files: filename + type noted.
+   * Map a group name to a confidential workstream directory name.
+   * gidc-sankosh -> sankosh, gidc-* -> gidc, others -> as-is.
+   */
+  private workstreamForGroup(groupName?: string): string {
+    if (!groupName) return 'default';
+    if (groupName === 'gidc-sankosh') return 'sankosh';
+    if (groupName.startsWith('gidc-')) return 'gidc';
+    return groupName;
+  }
+
+  /**
+   * Download Slack files, save to host filesystem, and extract text content.
+   * ALL file types are downloaded and saved to the confidential attachments dir
+   * so the Docker container can access them via the read-only mount.
+   * PDFs: full text extraction via pdf-parse (inline in message) + saved to disk.
+   * Other files: saved to disk; container path noted in the message.
    * Returns a formatted string to append to the message content.
    */
-  private async downloadAndExtractFiles(files: SlackFile[]): Promise<string> {
+  private async downloadAndExtractFiles(files: SlackFile[], groupName?: string): Promise<string> {
     const parts: string[] = [];
+
+    // Determine where to save attachments on the host filesystem.
+    // The container mounts /Users/jibot/switchboard/confidential/ as /workspace/confidential/ (read-only).
+    const workstream = this.workstreamForGroup(groupName);
+    const attachmentsDir = `/Users/jibot/switchboard/confidential/${workstream}/attachments`;
 
     for (const file of files) {
       const url = file.url_private_download || file.url_private;
@@ -314,19 +334,14 @@ export class SlackChannel implements Channel {
 
       // Size guard
       if (file.size && file.size > MAX_FILE_BYTES) {
-        parts.push(`[Attached: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB — too large to extract)]`);
+        parts.push(`[Attached: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB — too large to download)]`);
         continue;
       }
 
       const isPdf = file.mimetype === 'application/pdf' || file.filetype === 'pdf';
 
-      if (!isPdf) {
-        // For non-PDF files, just note the filename
-        parts.push(`[Attached: ${file.name} (${file.mimetype || file.filetype || 'unknown type'})]`);
-        continue;
-      }
-
-      // Download the PDF
+      // Download the file (all types)
+      let buffer: Buffer;
       try {
         const response = await fetch(url, {
           headers: { Authorization: `Bearer ${this.opts.slackBotToken}` },
@@ -338,9 +353,29 @@ export class SlackChannel implements Channel {
           continue;
         }
 
-        const buffer = Buffer.from(await response.arrayBuffer());
+        buffer = Buffer.from(await response.arrayBuffer());
+      } catch (err) {
+        logger.warn({ file: file.name, err }, 'Failed to download Slack file');
+        parts.push(`[Attached: ${file.name} — download error]`);
+        continue;
+      }
 
-        // Extract text
+      // Save to host filesystem so the container can access it
+      let savedHostPath: string | null = null;
+      let savedContainerPath: string | null = null;
+      try {
+        fs.mkdirSync(attachmentsDir, { recursive: true });
+        const destPath = path.join(attachmentsDir, file.name);
+        fs.writeFileSync(destPath, buffer);
+        savedHostPath = destPath;
+        savedContainerPath = `/workspace/confidential/${workstream}/attachments/${file.name}`;
+        logger.info({ file: file.name, destPath, workstream }, 'Saved Slack attachment to disk');
+      } catch (saveErr) {
+        logger.warn({ file: file.name, err: saveErr }, 'Failed to save attachment to disk');
+      }
+
+      if (isPdf) {
+        // PDFs: extract text inline so the agent can read it immediately
         try {
           const parser = new PDFParse({ data: new Uint8Array(buffer), verbosity: 0 });
           const textResult = await parser.getText();
@@ -350,7 +385,8 @@ export class SlackChannel implements Channel {
           await parser.destroy();
 
           if (text.length === 0) {
-            parts.push(`[Attached: ${file.name} — PDF contains no extractable text (scanned/image PDF)]`);
+            const savedNote = savedContainerPath ? ` Saved to: ${savedContainerPath}` : '';
+            parts.push(`[Attached: ${file.name} — PDF contains no extractable text (scanned/image PDF).${savedNote}]`);
             continue;
           }
 
@@ -371,11 +407,19 @@ export class SlackChannel implements Channel {
           );
         } catch (pdfErr) {
           logger.warn({ file: file.name, err: pdfErr }, 'PDF text extraction failed');
-          parts.push(`[Attached: ${file.name} — PDF extraction error]`);
+          const savedNote = savedContainerPath ? ` Saved to: ${savedContainerPath}` : '';
+          parts.push(`[Attached: ${file.name} — PDF extraction error.${savedNote}]`);
         }
-      } catch (err) {
-        logger.warn({ file: file.name, err }, 'Failed to download Slack file');
-        parts.push(`[Attached: ${file.name} — download error]`);
+      } else {
+        // Non-PDF: note that it was saved and give the container path
+        if (savedContainerPath) {
+          parts.push(
+            `[Attached: ${file.name} (${file.mimetype || file.filetype || 'unknown type'}) — ` +
+            `saved to ${savedContainerPath}]`,
+          );
+        } else {
+          parts.push(`[Attached: ${file.name} (${file.mimetype || file.filetype || 'unknown type'}) — received but could not be saved]`);
+        }
       }
     }
 
@@ -461,7 +505,8 @@ export class SlackChannel implements Channel {
       let content = text;
       const files = msg.files as SlackFile[] | undefined;
       if (files && files.length > 0) {
-        const extracted = await this.downloadAndExtractFiles(files);
+        const groupName = this.opts.registeredGroups()[chatJid]?.name;
+        const extracted = await this.downloadAndExtractFiles(files, groupName);
         content = content ? `${content}\n${extracted}` : extracted;
       }
 

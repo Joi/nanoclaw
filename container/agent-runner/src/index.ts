@@ -431,6 +431,10 @@ async function runQuery(
             NANOCLAW_EMAIL_ACCESS: containerInput.emailAccess ? '1' : '0',
           },
         },
+        qmd: {
+          type: 'http' as const,
+          url: 'http://host.docker.internal:7333/mcp',
+        },
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

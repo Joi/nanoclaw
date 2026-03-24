@@ -146,9 +146,10 @@ function buildVolumeMounts(
   if (group.intakeAccess || group.fileServingAccess) {
     settingsObj.mcpServers = {
       qmd: {
-        // SSE transport: supergateway on jibotmac host port 7333 serves HTTP/SSE.
+        // Streamable HTTP transport: supergateway on jibotmac host port 7333.
         // Claude Code SDK supports url-based MCP servers natively.
-        url: `http://host.docker.internal:7333/sse`,
+        type: "http",
+        url: `http://host.docker.internal:7333/mcp`,
       },
     };
   }
