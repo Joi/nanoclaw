@@ -61,6 +61,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  deleteSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
@@ -552,6 +553,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  retried = false,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -628,6 +630,17 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // If we tried to resume a session and it failed, clear the stuck session
+      // and retry once with a fresh session to avoid permanent crash loops.
+      if (sessionId && !retried) {
+        logger.warn(
+          { group: group.name, sessionId, error: output.error },
+          'Session resume failed — clearing stuck session and retrying fresh',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+        return runAgent(group, prompt, chatJid, onOutput, true);
+      }
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -637,6 +650,16 @@ async function runAgent(
 
     return 'success';
   } catch (err) {
+    // If we tried to resume a session and it crashed, clear and retry fresh.
+    if (sessionId && !retried) {
+      logger.warn(
+        { group: group.name, sessionId, err },
+        'Session resume crashed — clearing stuck session and retrying fresh',
+      );
+      delete sessions[group.folder];
+      deleteSession(group.folder);
+      return runAgent(group, prompt, chatJid, onOutput, true);
+    }
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   }
