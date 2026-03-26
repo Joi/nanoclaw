@@ -4,13 +4,9 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  addAllowlistEntry,
-  ChatAllowlistEntry,
   isSenderAllowed,
   isTriggerAllowed,
-  listAllowlistEntries,
   loadSenderAllowlist,
-  removeAllowlistEntry,
   saveSenderAllowlist,
   SenderAllowlistConfig,
   shouldDropMessage,
@@ -264,127 +260,5 @@ describe('saveSenderAllowlist', () => {
     expect(fs.existsSync(p)).toBe(true);
     const loaded = loadSenderAllowlist(p);
     expect(loaded.default.allow).toBe("*");
-  });
-});
-
-describe('addAllowlistEntry', () => {
-  it('adds new entry and persists to disk', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: {},
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'add-test.json');
-    const entry: ChatAllowlistEntry = { allow: ['alice'], mode: 'trigger' };
-    addAllowlistEntry('group-a', entry, p);
-    const loaded = loadSenderAllowlist(p);
-    expect(loaded.chats['group-a']).toEqual(entry);
-  });
-
-  it('overwrites existing entry for same JID', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: { 'group-a': { allow: ['alice'], mode: 'trigger' } },
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'overwrite-test.json');
-    const newEntry: ChatAllowlistEntry = { allow: ['bob'], mode: 'drop' };
-    addAllowlistEntry('group-a', newEntry, p);
-    const loaded = loadSenderAllowlist(p);
-    expect(loaded.chats['group-a']).toEqual(newEntry);
-  });
-
-  it('preserves other entries', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: { 'group-b': { allow: ['carol'], mode: 'trigger' } },
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'preserve-test.json');
-    const newEntry: ChatAllowlistEntry = { allow: ['dave'], mode: 'trigger' };
-    addAllowlistEntry('group-a', newEntry, p);
-    const loaded = loadSenderAllowlist(p);
-    expect(loaded.chats['group-b']).toEqual({ allow: ['carol'], mode: 'trigger' });
-    expect(loaded.chats['group-a']).toEqual(newEntry);
-  });
-
-  it('creates config file when path does not exist (bootstrap)', () => {
-    const p = cfgPath('bootstrap-test.json');
-    expect(fs.existsSync(p)).toBe(false);
-    const entry: ChatAllowlistEntry = { allow: ['alice'], mode: 'trigger' };
-    addAllowlistEntry('group-a', entry, p);
-    expect(fs.existsSync(p)).toBe(true);
-    const loaded = loadSenderAllowlist(p);
-    expect(loaded.chats['group-a']).toEqual(entry);
-  });
-});
-
-describe('removeAllowlistEntry', () => {
-  it('removes existing entry and persists, returning true', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: { 'group-a': { allow: ['alice'], mode: 'trigger' } },
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'remove-test.json');
-    const result = removeAllowlistEntry('group-a', p);
-    expect(result).toBe(true);
-    const loaded = loadSenderAllowlist(p);
-    expect(loaded.chats['group-a']).toBeUndefined();
-  });
-
-  it('returns false if entry does not exist', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: {},
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'remove-missing-test.json');
-    const result = removeAllowlistEntry('nonexistent', p);
-    expect(result).toBe(false);
-  });
-
-  it('preserves other entries', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: {
-        'group-a': { allow: ['alice'], mode: 'trigger' },
-        'group-b': { allow: ['bob'], mode: 'trigger' },
-      },
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'remove-preserve-test.json');
-    removeAllowlistEntry('group-a', p);
-    const loaded = loadSenderAllowlist(p);
-    expect(loaded.chats['group-a']).toBeUndefined();
-    expect(loaded.chats['group-b']).toEqual({ allow: ['bob'], mode: 'trigger' });
-  });
-});
-
-describe('listAllowlistEntries', () => {
-  it('returns all chat entries', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: {
-        'group-a': { allow: ['alice'], mode: 'trigger' },
-        'group-b': { allow: '*', mode: 'drop' },
-      },
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'list-test.json');
-    const entries = listAllowlistEntries(p);
-    expect(entries['group-a']).toEqual({ allow: ['alice'], mode: 'trigger' });
-    expect(entries['group-b']).toEqual({ allow: '*', mode: 'drop' });
-  });
-
-  it('returns empty object when no entries', () => {
-    const initial = {
-      default: { allow: '*', mode: 'trigger' },
-      chats: {},
-      logDenied: true,
-    };
-    const p = writeConfig(initial, 'list-empty-test.json');
-    const entries = listAllowlistEntries(p);
-    expect(entries).toEqual({});
   });
 });

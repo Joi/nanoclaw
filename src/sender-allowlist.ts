@@ -133,39 +133,6 @@ export function saveSenderAllowlist(
 ): void {
   const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
   const json = JSON.stringify(cfg, null, 2) + '\n';
-  // let fs errors propagate to caller
   fs.writeFileSync(filePath, json, 'utf-8');
   logger.info({ path: filePath }, 'sender-allowlist: config saved');
-}
-
-export function addAllowlistEntry(
-  jid: string,
-  entry: ChatAllowlistEntry,
-  pathOverride?: string,
-): void {
-  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
-  const cfg = loadSenderAllowlist(filePath);
-  cfg.chats[jid] = entry;
-  saveSenderAllowlist(cfg, filePath);
-  logger.info({ jid, path: filePath }, 'sender-allowlist: entry added');
-}
-
-export function removeAllowlistEntry(
-  jid: string,
-  pathOverride?: string,
-): boolean {
-  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
-  const cfg = loadSenderAllowlist(filePath);
-  if (!(jid in cfg.chats)) return false;
-  delete cfg.chats[jid];
-  saveSenderAllowlist(cfg, filePath);
-  logger.info({ jid, path: filePath }, 'sender-allowlist: entry removed');
-  return true;
-}
-
-export function listAllowlistEntries(
-  pathOverride?: string,
-): Record<string, ChatAllowlistEntry> {
-  const cfg = loadSenderAllowlist(pathOverride);
-  return cfg.chats;
 }
