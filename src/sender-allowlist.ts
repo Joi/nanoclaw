@@ -161,3 +161,10 @@ export function removeAllowlistEntry(
   logger.info({ jid, path: filePath }, 'sender-allowlist: entry removed');
   return true;
 }
+
+export function listAllowlistEntries(
+  pathOverride?: string,
+): Record<string, ChatAllowlistEntry> {
+  const cfg = loadSenderAllowlist(pathOverride);
+  return cfg.chats;
+}
