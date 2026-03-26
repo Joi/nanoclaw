@@ -839,8 +839,8 @@ async function main(): Promise<void> {
       ) {
         const group = registeredGroups[chatJid];
         if (group.intakeAccess && shouldRunIntake(group.channelMode, false)) {
-          // folder names: gidc-{workstream} (e.g. 'gidc-sankosh' -> 'sankosh')
-          const parts = group.folder.split('-'); const workstream = parts[0] === 'gidc' && parts.length > 1 ? parts.slice(1).join('-') : parts[0];
+          // workstream is the first dash-segment of the folder name (e.g. 'sankosh-updates' -> 'sankosh')
+          const workstream = group.folder.split('-')[0];
           // Guard: skip intake if workstream is empty or has no matching directory
           // (prevents silent writes for DM groups or folders without a '-' delimiter)
           if (!workstream || !fs.existsSync(path.join(CONFIDENTIAL_ROOT, workstream))) {

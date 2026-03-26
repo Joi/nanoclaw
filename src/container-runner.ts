@@ -146,10 +146,10 @@ function buildVolumeMounts(
   if (group.intakeAccess || group.fileServingAccess) {
     settingsObj.mcpServers = {
       qmd: {
-        // QMD runs inside the container as a stdio MCP server.
-        // The confidential SQLite index is bind-mounted from the host.
-        command: "qmd",
-        args: ["--index", "confidential", "mcp"],
+        // QMD MCP server: connect via socat to the host-running QMD MCP server
+        // (com.jibot.qmd-confidential on jibotmac, supergateway streamableHttp :7333)
+        command: "/bin/sh",
+        args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
       },
     };
   }
