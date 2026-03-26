@@ -15,7 +15,7 @@ export interface UserSnapshotEntry {
   slackUserId: string;
   jid: string;
   name: string;
-  tier: 'owner' | 'assistant' | 'staff';
+  tier: string;
   addedAt: string;
   remindersAccess: boolean;
   calendarAccess: boolean;
@@ -31,9 +31,7 @@ export interface UsersSnapshot {
  * Infer user tier from the group folder name.
  * Returns 'owner', 'assistant', or 'staff' based on folder string.
  */
-export function inferTier(
-  group: RegisteredGroup,
-): 'owner' | 'assistant' | 'staff' {
+function inferTier(group: RegisteredGroup): string {
   if (group.folder.includes('owner')) return 'owner';
   if (group.folder.includes('assistant')) return 'assistant';
   return 'staff';

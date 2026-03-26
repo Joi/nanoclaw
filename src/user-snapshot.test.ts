@@ -28,50 +28,60 @@ afterEach(() => {
 describe('buildUsersSnapshot', () => {
   it('extracts GIDC users with tier info from registered groups filtering by namespace prefix', () => {
     const registeredGroups: Record<string, RegisteredGroup> = {
-      'slack:gidc:U123': {
-        name: 'slack:gidc:U123',
+      'slack:gidc:U001': {
+        name: 'slack:gidc:U001',
         folder: 'gidc-template-owner',
         trigger: '@Andy',
         added_at: '2026-01-01T00:00:00.000Z',
         remindersAccess: true,
         calendarAccess: true,
       },
-      'slack:gidc:U456': {
-        name: 'slack:gidc:U456',
-        folder: 'gidc-template-staff',
+      'slack:gidc:U002': {
+        name: 'slack:gidc:U002',
+        folder: 'gidc-template-assistant',
         trigger: '@Andy',
         added_at: '2026-01-02T00:00:00.000Z',
       },
-      // Different namespace — should be excluded
-      'slack:other:U789': {
-        name: 'slack:other:U789',
+      'slack:gidc:U003': {
+        name: 'slack:gidc:U003',
         folder: 'gidc-template-staff',
         trigger: '@Andy',
         added_at: '2026-01-03T00:00:00.000Z',
       },
-      // Channel JID — should be skipped
+      // Different namespace -- should be excluded
+      'slack:other:U999': {
+        name: 'slack:other:U999',
+        folder: 'gidc-template-staff',
+        trigger: '@Andy',
+        added_at: '2026-01-04T00:00:00.000Z',
+      },
+      // Channel JID -- should be skipped
       'slack:gidc:channel:general': {
         name: 'slack:gidc:channel:general',
         folder: 'gidc-template-staff',
         trigger: '@Andy',
-        added_at: '2026-01-04T00:00:00.000Z',
+        added_at: '2026-01-05T00:00:00.000Z',
       },
     };
 
     const snapshot = buildUsersSnapshot(registeredGroups, 'gidc');
 
     expect(snapshot.namespace).toBe('gidc');
-    expect(snapshot.users).toHaveLength(2);
+    expect(snapshot.users).toHaveLength(3);
 
-    const owner = snapshot.users.find((u) => u.slackUserId === 'U123');
+    const owner = snapshot.users.find((u) => u.slackUserId === 'U001');
     expect(owner).toBeDefined();
-    expect(owner?.jid).toBe('slack:gidc:U123');
+    expect(owner?.jid).toBe('slack:gidc:U001');
     expect(owner?.tier).toBe('owner');
     expect(owner?.remindersAccess).toBe(true);
     expect(owner?.calendarAccess).toBe(true);
     expect(owner?.addedAt).toBe('2026-01-01T00:00:00.000Z');
 
-    const staff = snapshot.users.find((u) => u.slackUserId === 'U456');
+    const assistant = snapshot.users.find((u) => u.slackUserId === 'U002');
+    expect(assistant).toBeDefined();
+    expect(assistant?.tier).toBe('assistant');
+
+    const staff = snapshot.users.find((u) => u.slackUserId === 'U003');
     expect(staff).toBeDefined();
     expect(staff?.tier).toBe('staff');
     expect(staff?.remindersAccess).toBe(false);
