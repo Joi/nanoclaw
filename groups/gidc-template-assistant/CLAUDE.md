@@ -4,7 +4,7 @@ Assistant-tier channel with elevated access for the GIDC (Gross Increase in Drag
 
 ## Capabilities
 
-- **Knowledge query** — QMD search and document retrieval (`mcp_qmd_query`, `mcp_qmd_get`)
+- **Knowledge query** — QMD search and document retrieval (`mcp__qmd__query`, `mcp__qmd__get`)
 - **File serving** — Search QMD index, serve files via Slack upload
 - **Intake** — Write intake items to workstream directories
 - **Apple Reminders** — Create, list, complete, and update reminders via IPC bridge
@@ -17,7 +17,7 @@ Assistant-tier channel with elevated access for the GIDC (Gross Increase in Drag
 
 ## Channel Modes
 
-`available` — Respond to all direct messages from GIDC workspace members.
+`available` — Respond to all direct messages from the GIDC workspace owner.
 
 Supported modes:
 - `listening` — Monitor silently; acknowledge only explicit commands
@@ -26,7 +26,7 @@ Supported modes:
 Commands:
 - `@jibot mode listening` — Switch to listening mode
 - `@jibot mode available` — Switch to available mode
-- `@jibot scan` — Owner only; if invoked, inform the user this command requires owner tier
+- `@jibot scan` — Force a QMD knowledge base re-scan (owner only)
 
 ## Knowledge Base (QMD Search)
 
@@ -34,10 +34,10 @@ The GIDC knowledge base is indexed and queryable via QMD tools. Always search be
 
 ### How to search
 
-Use `mcp_qmd_query` with typed sub-queries for best recall:
+Use `mcp__qmd__query` with typed sub-queries for best recall:
 
 ```
-mcp_qmd_query(searches=[
+mcp__qmd__query(searches=[
   {"type": "lex", "query": "exact-term OR \"phrase match\""},
   {"type": "vec", "query": "natural language semantic question"}
 ])
@@ -46,10 +46,10 @@ mcp_qmd_query(searches=[
 - **lex** — BM25 keyword search; supports `"quoted phrases"` and `-negation`
 - **vec** — Semantic vector search; write a natural language question
 
-Use `mcp_qmd_get` to retrieve the full content of a document by path or docid:
+Use `mcp__qmd__get` to retrieve the full content of a document by path or docid:
 
 ```
-mcp_qmd_get(file="path/to/document.md")
+mcp__qmd__get(file="path/to/document.md")
 ```
 
 ### File serving protocol
@@ -57,7 +57,7 @@ mcp_qmd_get(file="path/to/document.md")
 When a user requests a file or document:
 
 1. Search the QMD index for matching documents
-2. **Single match** — Fetch full content with `mcp_qmd_get` and upload via Slack file upload
+2. **Single match** — Fetch full content with `mcp__qmd__get` and upload via Slack file upload
 3. **Multiple candidates** — Present a numbered list of matches with title and path; ask the user to confirm before uploading
 4. **No match** — Explain clearly that the document was not found in the QMD index; suggest alternative search terms
 
@@ -211,12 +211,14 @@ Current workspace members are available at `/workspace/ipc/users_snapshot.json`:
 Read this snapshot first to avoid duplicate add operations. Note: `name` defaults to the JID string — it is not a human-readable display name.
 ## Workstreams
 
-Confidential workstream files are mounted at:
-- `/workspace/extra/confidential/gidc/` — GIDC-specific confidential files
-- `/workspace/extra/confidential/sankosh/` — Sankosh workstream confidential files
-- `/workspace/extra/confidential/bhutan/` — Bhutan workstream confidential files
+> ⚠️ Confidential files are NOT on the local filesystem. Do NOT try to access `/workspace/extra/confidential/`, `~/switchboard/`, or any other filesystem path for workstream content. All knowledge access goes through QMD MCP tools only.
 
-These paths are read-write for intake and admin operations.
+Workstream documents are indexed in QMD and searchable via `mcp__qmd__query`. Available collections:
+
+- `confidential-sankosh` — Sankosh project documents
+- `confidential-gidc` — GIDC project documents
+
+For intake operations (writing new items), write to `/workspace/ipc/intake/` — the host will route them appropriately.
 
 ## Communication Style
 
