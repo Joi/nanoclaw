@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { loadMountAllowlist, validateMount } from './mount-security.js';
+import type { MountAllowlist } from './types.js';
 
 /**
  * Integration tests for mount-security configuration.
@@ -17,33 +18,38 @@ import { loadMountAllowlist, validateMount } from './mount-security.js';
  */
 
 describe("loadMountAllowlist - integration (reads real ~/.config/nanoclaw/mount-allowlist.json)", () => {
+  let allowlist: MountAllowlist | null;
+
+  beforeAll(() => {
+    allowlist = loadMountAllowlist();
+  });
+
   it("returns non-null when config file exists", () => {
-    const allowlist = loadMountAllowlist();
     expect(allowlist).not.toBeNull();
   });
 
   it("returns both ~/jibrain and ~/switchboard/confidential roots", () => {
-    const allowlist = loadMountAllowlist();
-    const paths = allowlist!.allowedRoots.map((r) => r.path);
+    if (allowlist === null) return;
+    const paths = allowlist.allowedRoots.map((r) => r.path);
     expect(paths).toContain("~/jibrain");
     expect(paths).toContain("~/switchboard/confidential");
   });
 
   it("returns exactly 2 allowed roots", () => {
-    const allowlist = loadMountAllowlist();
-    expect(allowlist!.allowedRoots).toHaveLength(2);
+    if (allowlist === null) return;
+    expect(allowlist.allowedRoots).toHaveLength(2);
   });
 
   it("~/jibrain has allowReadWrite: true", () => {
-    const allowlist = loadMountAllowlist();
-    const jibrain = allowlist!.allowedRoots.find((r) => r.path === "~/jibrain");
+    if (allowlist === null) return;
+    const jibrain = allowlist.allowedRoots.find((r) => r.path === "~/jibrain");
     expect(jibrain).toBeDefined();
     expect(jibrain!.allowReadWrite).toBe(true);
   });
 
   it("~/switchboard/confidential has allowReadWrite: true", () => {
-    const allowlist = loadMountAllowlist();
-    const confidential = allowlist!.allowedRoots.find(
+    if (allowlist === null) return;
+    const confidential = allowlist.allowedRoots.find(
       (r) => r.path === "~/switchboard/confidential",
     );
     expect(confidential).toBeDefined();
@@ -51,8 +57,8 @@ describe("loadMountAllowlist - integration (reads real ~/.config/nanoclaw/mount-
   });
 
   it("~/switchboard/confidential has correct description", () => {
-    const allowlist = loadMountAllowlist();
-    const confidential = allowlist!.allowedRoots.find(
+    if (allowlist === null) return;
+    const confidential = allowlist.allowedRoots.find(
       (r) => r.path === "~/switchboard/confidential",
     );
     expect(confidential!.description).toBe(
@@ -74,7 +80,8 @@ describe("validateMount - ~/switchboard/confidential directory tree", () => {
   for (const subdir of subdirs) {
     it(`~/switchboard/confidential/${subdir} exists and is mountable read-write`, () => {
       const hostPath = `~/switchboard/confidential/${subdir}`;
-      const containerPath = subdir.replace("/", "-"); // e.g. "sankosh-intake"
+      // containerPath must be relative, no slashes — convert "sankosh/intake" → "sankosh-intake"
+      const containerPath = subdir.replace("/", "-");
       const result = validateMount(
         { hostPath, containerPath, readonly: false },
         true,
