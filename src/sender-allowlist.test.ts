@@ -406,4 +406,26 @@ describe("listAllowlistEntries", () => {
 
     expect(entries).toEqual({});
   });
+
+  it("returned object is independent from internal state (shallow copy)", () => {
+    const p = writeConfig(
+      {
+        default: { allow: "*", mode: "trigger" },
+        chats: {
+          "jid-one": { allow: ["alice"], mode: "trigger" },
+        },
+        logDenied: true,
+      },
+      "shallow-copy-test.json",
+    );
+
+    const entries = listAllowlistEntries(p);
+    // Mutate the returned object
+    entries["injected-key"] = { allow: "*", mode: "drop" };
+
+    // Re-read: mutation of returned value should not affect subsequent calls
+    const reread = listAllowlistEntries(p);
+    expect(reread["injected-key"]).toBeUndefined();
+    expect(Object.keys(reread)).toHaveLength(1);
+  });
 });
