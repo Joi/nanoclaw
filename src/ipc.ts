@@ -613,50 +613,71 @@ export async function processTaskIpc(
       }
       break;
 
-    case 'user_manage':
+    case 'user_manage': {
+      // Only owner/assistant (main or elevated) can manage users
+      // Security: isMain check prevents staff groups from escalating
       if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized user_manage attempt blocked');
-        break;
-      }
-      if (!data.slackUserId || !data.namespace) {
         logger.warn(
-          { data },
-          'Invalid user_manage request - missing slackUserId or namespace',
+          { sourceGroup },
+          'Unauthorized user_manage attempt blocked',
         );
         break;
       }
-      {
-        const userJid = `slack:${data.namespace}:${data.slackUserId}`;
-        const action = data.action;
-        if (action === 'add') {
-          const validTiers = ['owner', 'assistant', 'staff'] as const;
-          type ValidTier = (typeof validTiers)[number];
-          if (!validTiers.includes(data.tier as ValidTier)) {
-            logger.warn({ tier: data.tier }, 'user_manage: invalid tier');
-            break;
-          }
-          const tier = data.tier as ValidTier;
-          const templateFolder = `gidc-template-${tier}`;
-          const isAdminTier = tier === 'owner' || tier === 'assistant';
-          deps.registerGroup(userJid, {
-            name: userJid,
-            folder: templateFolder,
-            trigger: userJid,
-            added_at: new Date().toISOString(),
-            requiresTrigger: true,
-            remindersAccess: isAdminTier ? true : undefined,
-            calendarAccess: isAdminTier ? true : undefined,
-          });
-          addAllowlistEntry(userJid, { allow: '*', mode: 'trigger' });
-          logger.info({ userJid, tier }, 'user_manage: user added');
-        } else if (action === 'remove') {
-          removeAllowlistEntry(userJid);
-          logger.info({ userJid }, 'user_manage: user removed');
-        } else {
-          logger.warn({ action, userJid }, 'user_manage: unknown action');
+
+      const { action, slackUserId, tier, namespace, name } = data;
+
+      if (!slackUserId || !namespace) {
+        logger.warn({ data }, 'user_manage: missing slackUserId or namespace');
+        break;
+      }
+
+      const userJid = `slack:${namespace}:${slackUserId}`;
+
+      if (action === 'add') {
+        if (!tier || !['owner', 'assistant', 'staff'].includes(tier)) {
+          logger.warn({ tier }, 'user_manage: invalid tier');
+          break;
         }
+
+        const templateFolder = `gidc-template-${tier}`;
+        const siblings = getRegisteredGroupsByFolder(templateFolder);
+        if (siblings.length === 0) {
+          logger.info(
+            { templateFolder, tier },
+            'user_manage: using template folder directly',
+          );
+        }
+
+        const isOwnerTier = tier === 'owner';
+        const isAssistantTier = tier === 'assistant';
+        const isAdminTier = isOwnerTier || isAssistantTier;
+
+        deps.registerGroup(userJid, {
+          name: name || `GIDC ${tier} (${slackUserId})`,
+          folder: templateFolder,
+          trigger: '@gibot',
+          added_at: new Date().toISOString(),
+          requiresTrigger: false,
+          remindersAccess: isAdminTier,
+          calendarAccess: isAdminTier,
+        });
+
+        addAllowlistEntry(userJid, { allow: '*', mode: 'trigger' });
+
+        logger.info(
+          { userJid, tier, name },
+          'user_manage: user added',
+        );
+      } else if (action === 'remove') {
+        removeAllowlistEntry(userJid);
+        // Don't unregister from DB — allowlist removal is sufficient to block.
+        // DB entry becomes dormant. Safer than deleting DB rows.
+        logger.info({ userJid }, 'user_manage: user removed');
+      } else {
+        logger.warn({ action }, 'user_manage: unknown action');
       }
       break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

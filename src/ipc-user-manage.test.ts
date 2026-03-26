@@ -144,16 +144,40 @@ describe('user_manage add action', () => {
     const [jid, group] = registerGroupCalls[0];
     expect(jid).toBe('slack:testns:U123');
     expect(group.folder).toBe('gidc-template-staff');
-    expect(group.name).toBe('slack:testns:U123');
-    expect(group.requiresTrigger).toBe(true);
-    // staff is not admin tier — no reminders/calendar access
-    expect(group.remindersAccess).toBeUndefined();
-    expect(group.calendarAccess).toBeUndefined();
+    // spec: name defaults to `GIDC ${tier} (${slackUserId})`
+    expect(group.name).toBe('GIDC staff (U123)');
+    // spec: trigger is '@gibot'
+    expect(group.trigger).toBe('@gibot');
+    // spec: requiresTrigger is false
+    expect(group.requiresTrigger).toBe(false);
+    // staff is not admin tier — remindersAccess/calendarAccess are false (not undefined)
+    expect(group.remindersAccess).toBe(false);
+    expect(group.calendarAccess).toBe(false);
 
     expect(addAllowlistEntry).toHaveBeenCalledWith('slack:testns:U123', {
       allow: '*',
       mode: 'trigger',
     });
+  });
+
+  it('uses provided name when name is specified', async () => {
+    await processTaskIpc(
+      {
+        type: 'user_manage',
+        action: 'add',
+        slackUserId: 'U123',
+        namespace: 'testns',
+        tier: 'staff',
+        name: 'Alice Johnson',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(registerGroupCalls).toHaveLength(1);
+    const [, group] = registerGroupCalls[0];
+    expect(group.name).toBe('Alice Johnson');
   });
 
   it('registers group with reminders+calendar access for owner tier (admin)', async () => {
@@ -174,6 +198,9 @@ describe('user_manage add action', () => {
     const [jid, group] = registerGroupCalls[0];
     expect(jid).toBe('slack:testns:U456');
     expect(group.folder).toBe('gidc-template-owner');
+    expect(group.name).toBe('GIDC owner (U456)');
+    expect(group.trigger).toBe('@gibot');
+    expect(group.requiresTrigger).toBe(false);
     expect(group.remindersAccess).toBe(true);
     expect(group.calendarAccess).toBe(true);
 
@@ -201,6 +228,9 @@ describe('user_manage add action', () => {
     const [jid, group] = registerGroupCalls[0];
     expect(jid).toBe('slack:testns:U789');
     expect(group.folder).toBe('gidc-template-assistant');
+    expect(group.name).toBe('GIDC assistant (U789)');
+    expect(group.trigger).toBe('@gibot');
+    expect(group.requiresTrigger).toBe(false);
     expect(group.remindersAccess).toBe(true);
     expect(group.calendarAccess).toBe(true);
   });
