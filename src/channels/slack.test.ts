@@ -15,6 +15,20 @@ vi.mock('../logger.js', () => ({
 // Hoisted mock for files.uploadV2 — accessible in both MockApp and tests
 const mockFilesUploadV2 = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
 
+// Hoisted mock for fs.createReadStream
+const mockCreateReadStream = vi.hoisted(() => vi.fn().mockReturnValue({}));
+
+vi.mock("fs", () => ({
+  default: {
+    createReadStream: mockCreateReadStream,
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+  },
+  createReadStream: mockCreateReadStream,
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+}));
+
 
 // Use vi.hoisted to capture app instances created inside the constructor
 const appRef = vi.hoisted(() => ({ current: null as any }));
@@ -40,12 +54,13 @@ vi.mock('@slack/bolt', () => {
           },
         }),
       },
-      files: { uploadV2: mockFilesUploadV2 },
+      filesUploadV2: mockFilesUploadV2,
     };
 
     start = vi.fn().mockResolvedValue(undefined);
     stop = vi.fn().mockResolvedValue(undefined);
     message = vi.fn();
+    error = vi.fn();
 
     constructor(_opts: unknown) {
       appRef.current = this;
