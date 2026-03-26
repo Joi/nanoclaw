@@ -165,6 +165,7 @@ export function removeAllowlistEntry(
 export function listAllowlistEntries(
   pathOverride?: string,
 ): Record<string, ChatAllowlistEntry> {
-  const cfg = loadSenderAllowlist(pathOverride);
-  return cfg.chats;
+  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
+  const cfg = loadSenderAllowlist(filePath);
+  return { ...cfg.chats };
 }
