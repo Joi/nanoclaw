@@ -9,6 +9,12 @@ const POLL_INTERVAL_MS = 3000;
 const RECEIVE_TIMEOUT_S = 1; // signal-cli receive timeout in seconds
 const RECEIVE_FETCH_TIMEOUT_MS = RECEIVE_TIMEOUT_S * 1000 + 5000; // HTTP timeout for receive calls
 
+// Reconnection constants
+const CONNECT_MAX_RETRIES = 10;
+const CONNECT_INITIAL_DELAY_MS = 2000;   // 2s, doubles each retry up to ~60s
+const RECONNECT_FAILURE_THRESHOLD = 5;   // consecutive poll RPC failures before reconnect attempt
+const RECONNECT_COOLDOWN_MS = 30000;     // minimum 30s between reconnect attempts
+
 export interface SignalChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -80,6 +86,9 @@ export class SignalChannel implements Channel {
   private pollCount = 0;
   private consecutiveEmpty = 0;
   private lastReceiveAt = 0;
+  private consecutiveRpcFailures = 0;
+  private lastReconnectAttempt = 0;
+  private reconnecting = false;
 
   constructor(opts: SignalChannelOpts) {
     this.opts = opts;
@@ -89,28 +98,46 @@ export class SignalChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    // Verify signal-cli is reachable via JSON-RPC version call
-    const result = await this.rpc<{ version: string }>('version', {});
-    if (!result) {
-      throw new Error(`Cannot reach signal-cli JSON-RPC at ${this.rpcUrl}`);
-    }
-    logger.info({ url: this.rpcUrl, version: result.version }, 'signal-cli daemon reachable');
+    // Retry with exponential backoff — signal-cli (Java) can take several
+    // seconds to start, especially after a launchd restart.
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < CONNECT_MAX_RETRIES; attempt++) {
+      const result = await this.rpc<{ version: string }>('version', {});
+      if (result) {
+        logger.info(
+          { url: this.rpcUrl, version: result.version, attempt },
+          'signal-cli daemon reachable',
+        );
+        this.connected = true;
+        this.consecutiveRpcFailures = 0;
 
-    this.connected = true;
+        // Flush any messages queued before connection
+        this.flushOutgoingQueue().catch((err) =>
+          logger.error({ err }, 'Failed to flush Signal outgoing queue'),
+        );
 
-    // Flush any messages queued before connection
-    this.flushOutgoingQueue().catch((err) =>
-      logger.error({ err }, 'Failed to flush Signal outgoing queue'),
-    );
+        // Start polling for inbound messages
+        this.startPolling();
 
-    // Start polling for inbound messages
-    this.pollTimer = setInterval(() => {
-      this.poll().catch((err) =>
-        logger.warn({ err }, 'Signal poll error'),
+        logger.info('Signal channel connected, polling started');
+        return;
+      }
+
+      const delay = Math.min(
+        CONNECT_INITIAL_DELAY_MS * Math.pow(2, attempt),
+        60000,
       );
-    }, POLL_INTERVAL_MS);
+      lastErr = new Error(
+        `Cannot reach signal-cli JSON-RPC at ${this.rpcUrl}`,
+      );
+      logger.warn(
+        { attempt: attempt + 1, maxRetries: CONNECT_MAX_RETRIES, retryInMs: delay },
+        'signal-cli not reachable, retrying...',
+      );
+      await sleep(delay);
+    }
 
-    logger.info('Signal channel connected, polling started');
+    throw lastErr ?? new Error(`Cannot reach signal-cli JSON-RPC at ${this.rpcUrl}`);
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -187,6 +214,17 @@ export class SignalChannel implements Channel {
 
   // --- Polling ---
 
+  private startPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
+    this.pollTimer = setInterval(() => {
+      this.poll().catch((err) =>
+        logger.warn({ err }, 'Signal poll error'),
+      );
+    }, POLL_INTERVAL_MS);
+  }
+
   private async poll(): Promise<void> {
     if (this.polling) {
       logger.debug('Signal poll skipped (previous still running)');
@@ -199,7 +237,20 @@ export class SignalChannel implements Channel {
         timeout: RECEIVE_TIMEOUT_S,
       }, RECEIVE_FETCH_TIMEOUT_MS);
 
-      if (!entries || entries.length === 0) {
+      if (entries === null) {
+        // RPC call itself failed (not just empty results)
+        this.consecutiveRpcFailures++;
+
+        if (this.consecutiveRpcFailures >= RECONNECT_FAILURE_THRESHOLD) {
+          await this.attemptReconnect();
+        }
+        return;
+      }
+
+      // RPC succeeded — reset failure counter
+      this.consecutiveRpcFailures = 0;
+
+      if (entries.length === 0) {
         this.consecutiveEmpty++;
         // Heartbeat every 20 polls (~60s) when idle
         if (this.pollCount % 20 === 0) {
@@ -227,6 +278,51 @@ export class SignalChannel implements Channel {
       }
     } finally {
       this.polling = false;
+    }
+  }
+
+  // --- Reconnection ---
+
+  private async attemptReconnect(): Promise<void> {
+    if (this.reconnecting) return;
+
+    const now = Date.now();
+    if (now - this.lastReconnectAttempt < RECONNECT_COOLDOWN_MS) {
+      return; // too soon since last attempt
+    }
+
+    this.reconnecting = true;
+    this.lastReconnectAttempt = now;
+
+    logger.warn(
+      { consecutiveRpcFailures: this.consecutiveRpcFailures },
+      'Signal: RPC failures exceeded threshold, attempting reconnect...',
+    );
+
+    // Mark disconnected while we try
+    this.connected = false;
+
+    try {
+      const result = await this.rpc<{ version: string }>('version', {});
+      if (result) {
+        this.connected = true;
+        this.consecutiveRpcFailures = 0;
+        logger.info(
+          { version: result.version },
+          'Signal: reconnected to signal-cli',
+        );
+
+        // Flush queued messages
+        this.flushOutgoingQueue().catch((err) =>
+          logger.error({ err }, 'Failed to flush Signal outgoing queue after reconnect'),
+        );
+      } else {
+        logger.warn('Signal: reconnect failed, signal-cli still unreachable');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Signal: reconnect attempt error');
+    } finally {
+      this.reconnecting = false;
     }
   }
 
@@ -410,6 +506,10 @@ export class SignalChannel implements Channel {
 }
 
 // --- Helpers ---
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function mimeToExt(contentType: string): string {
   const map: Record<string, string> = {
