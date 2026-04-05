@@ -259,8 +259,7 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     const content = JSON.parse(settingsCall![1] as string);
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers.qmd).toEqual({
-      command: "/bin/sh",
-      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
+      url: "http://host.docker.internal:7333/mcp",
     });
   });
 
@@ -280,8 +279,7 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     const content = JSON.parse(settingsCall![1] as string);
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers.qmd).toEqual({
-      command: "/bin/sh",
-      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
+      url: "http://host.docker.internal:7333/mcp",
     });
   });
 
@@ -313,16 +311,13 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     const content = JSON.parse(settingsCall![1] as string);
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers['qmd-public']).toEqual({
-      command: "/bin/sh",
-      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
+      url: "http://host.docker.internal:7333/mcp",
     });
     expect(content.mcpServers['qmd-crm']).toEqual({
-      command: "/bin/sh",
-      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7334"],
+      url: "http://host.docker.internal:7334/mcp",
     });
     expect(content.mcpServers['qmd-domain-gidc']).toEqual({
-      command: "/bin/sh",
-      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7335"],
+      url: "http://host.docker.internal:7335/mcp",
     });
   });
 

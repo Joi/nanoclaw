@@ -154,11 +154,10 @@ function buildVolumeMounts(
       },
     };
     if (qmdPorts && Object.keys(qmdPorts).length > 0) {
-      const mcpServers: Record<string, { command: string; args: string[] }> = {};
+      const mcpServers: Record<string, { url: string }> = {};
       for (const [indexName, port] of Object.entries(qmdPorts)) {
         mcpServers[`qmd-${indexName}`] = {
-          command: '/bin/sh',
-          args: ['-c', `exec socat STDIO TCP:host.docker.internal:${port}`],
+          url: `http://host.docker.internal:${port}/mcp`,
         };
       }
       settingsObj.mcpServers = mcpServers;
@@ -166,8 +165,7 @@ function buildVolumeMounts(
       // Fallback for non-channel containers (DMs, Signal, etc.)
       settingsObj.mcpServers = {
         qmd: {
-          command: '/bin/sh',
-          args: ['-c', 'exec socat STDIO TCP:host.docker.internal:7333'],
+          url: 'http://host.docker.internal:7333/mcp',
         },
       };
     }
