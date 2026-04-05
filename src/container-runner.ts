@@ -262,19 +262,21 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
-  } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
-    );
+  // Credential proxy injects API credentials — containers never see real secrets.
+  // Point containers at the host's credential proxy via ANTHROPIC_BASE_URL.
+  args.push('-e', 'ANTHROPIC_BASE_URL=http://host.docker.internal:10254');
+
+  // Try OneCLI as supplementary config (optional, often not installed)
+  try {
+    const onecliApplied = await onecli.applyContainerConfig(args, {
+      addHostMapping: false,
+      agent: agentIdentifier,
+    });
+    if (onecliApplied) {
+      logger.info({ containerName }, 'OneCLI gateway config applied');
+    }
+  } catch {
+    // OneCLI not available — credential proxy handles auth
   }
 
   // Runtime-specific args for host gateway resolution

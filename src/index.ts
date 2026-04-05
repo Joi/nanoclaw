@@ -626,6 +626,15 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Start credential proxy for container API access
+  const { startCredentialProxy } = await import('./credential-proxy.js');
+  const CREDENTIAL_PROXY_PORT = 10254;
+  try {
+    await startCredentialProxy(CREDENTIAL_PROXY_PORT);
+  } catch (err) {
+    logger.warn({ err }, 'Failed to start credential proxy — containers may lack API access');
+  }
+
   // Reload channel configs periodically (every 5 minutes) in case configs change via Syncthing
   setInterval(() => {
     channelConfigs = loadChannelConfigs(CHANNEL_CONFIGS_DIR);
