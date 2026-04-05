@@ -12,6 +12,24 @@ Public channel bot for the joiito Slack workspace #jibot channel.
 This is a public-access channel. No confidential workstream data is available.
 QMD searches will use the `public` index only.
 
+## Searching for People
+
+When someone asks about a person using a Slack handle (e.g., "@rejon", "@karma"):
+1. **Strip the `@` prefix** — Slack handles are not indexed with `@`
+2. **Search QMD** with the bare handle as a keyword (lex search)
+3. **Also search by likely real name** — many handles are nicknames or abbreviations
+4. **Check aliases** — jibrain atlas people files may list handles under `organizations`, `aliases`, or `links`
+
+Use both `lex` (keyword) and `vec` (semantic) searches. Example for "@rejon":
+```
+mcp__qmd-public__query(searches=[
+  {"type": "lex", "query": "rejon"},
+  {"type": "vec", "query": "who is rejon"}
+])
+```
+
+If the handle doesn't match directly, try variations without special characters.
+
 ## Help Response
 
 When a user says "help", respond with this (adjust wording naturally but cover all items):
