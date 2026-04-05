@@ -153,26 +153,40 @@ function buildVolumeMounts(
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
       },
     };
-    if (qmdPorts && Object.keys(qmdPorts).length > 0) {
-      const mcpServers: Record<string, { url: string }> = {};
-      for (const [indexName, port] of Object.entries(qmdPorts)) {
-        mcpServers[`qmd-${indexName}`] = {
-          url: `http://host.docker.internal:${port}/mcp`,
-        };
-      }
-      settingsObj.mcpServers = mcpServers;
-    } else if (group.intakeAccess || group.fileServingAccess) {
-      // Fallback for non-channel containers (DMs, Signal, etc.)
-      settingsObj.mcpServers = {
-        qmd: {
-          url: 'http://host.docker.internal:7333/mcp',
-        },
-      };
-    }
     fs.writeFileSync(
       settingsFile,
       JSON.stringify(settingsObj, null, 2) + '\n',
     );
+  }
+
+  // Write MCP servers to .claude.json (Claude Code reads MCP config from here, not settings.json)
+  const claudeJsonDir = path.join(DATA_DIR, 'sessions', group.folder);
+  const claudeJsonFile = path.join(claudeJsonDir, 'claude.json');
+  if (!fs.existsSync(claudeJsonFile)) {
+    const claudeJson: Record<string, unknown> = {};
+    if (qmdPorts && Object.keys(qmdPorts).length > 0) {
+      const mcpServers: Record<string, { type: string; url: string }> = {};
+      for (const [indexName, port] of Object.entries(qmdPorts)) {
+        mcpServers[`qmd-${indexName}`] = {
+          type: 'http',
+          url: `http://host.docker.internal:${port}/mcp`,
+        };
+      }
+      claudeJson.mcpServers = mcpServers;
+    } else if (group.intakeAccess || group.fileServingAccess) {
+      claudeJson.mcpServers = {
+        qmd: {
+          type: 'http',
+          url: 'http://host.docker.internal:7333/mcp',
+        },
+      };
+    }
+    if (claudeJson.mcpServers) {
+      fs.writeFileSync(
+        claudeJsonFile,
+        JSON.stringify(claudeJson, null, 2) + '\n',
+      );
+    }
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -185,6 +199,15 @@ function buildVolumeMounts(
       const dstDir = path.join(skillsDst, skillDir);
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
+  }
+  // Mount claude.json for MCP server configuration
+  const claudeJsonPath = path.join(claudeJsonDir, 'claude.json');
+  if (fs.existsSync(claudeJsonPath)) {
+    mounts.push({
+      hostPath: claudeJsonPath,
+      containerPath: '/home/node/.claude.json',
+      readonly: false,
+    });
   }
   mounts.push({
     hostPath: groupSessionsDir,
@@ -267,18 +290,7 @@ async function buildContainerArgs(
   args.push('-e', 'ANTHROPIC_BASE_URL=http://host.docker.internal:10254');
   args.push('-e', 'ANTHROPIC_API_KEY=proxy');
 
-  // Try OneCLI as supplementary config (optional, often not installed)
-  try {
-    const onecliApplied = await onecli.applyContainerConfig(args, {
-      addHostMapping: false,
-      agent: agentIdentifier,
-    });
-    if (onecliApplied) {
-      logger.info({ containerName }, 'OneCLI gateway config applied');
-    }
-  } catch {
-    // OneCLI not available — credential proxy handles auth
-  }
+  // OneCLI gateway is not installed — credential proxy handles auth
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
