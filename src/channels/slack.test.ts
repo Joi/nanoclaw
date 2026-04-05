@@ -60,6 +60,7 @@ vi.mock('@slack/bolt', () => {
     start = vi.fn().mockResolvedValue(undefined);
     stop = vi.fn().mockResolvedValue(undefined);
     message = vi.fn();
+    event = vi.fn();
     error = vi.fn();
 
     constructor(_opts: unknown) {
