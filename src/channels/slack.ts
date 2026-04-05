@@ -513,7 +513,9 @@ export class SlackChannel implements Channel {
         content = content ? `${content}\n${extracted}` : extracted;
       }
 
-      // Strip bot mention from channel messages (e.g. "<@U123ABC> hello" -> "@jibot hello")
+      // Expand user mentions to real names (e.g. "<@U123ABC>" -> "@Jon Phillips")
+      content = await this.expandUserMentions(content);
+      // Strip bot mention from channel messages (e.g. "<@UBOTID> hello" -> "@jibot hello")
       const cleanText = isDm ? content : this.stripBotMention(content);
 
       // Notify chat metadata
@@ -636,6 +638,25 @@ export class SlackChannel implements Channel {
     if (!this.botUserId) return text;
     // Slack mentions look like <@U01ABC123>
     return text.replace(new RegExp(`<@${this.botUserId}>\\s*`, "g"), "@jibot ").trim();
+  }
+
+  /**
+   * Expand all Slack user mentions (<@USERID>) to @RealName.
+   * The bot mention is handled separately by stripBotMention.
+   */
+  private async expandUserMentions(text: string): Promise<string> {
+    const mentionPattern = /<@(U[A-Z0-9]+)>/g;
+    const mentions = [...text.matchAll(mentionPattern)];
+    if (mentions.length === 0) return text;
+
+    let result = text;
+    for (const match of mentions) {
+      const uid = match[1];
+      if (uid === this.botUserId) continue; // handled by stripBotMention
+      const name = await this.resolveUserName(uid);
+      result = result.replace(match[0], `@${name}`);
+    }
+    return result;
   }
 
   private slackTsToIso(ts: string): string {
