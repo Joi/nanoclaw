@@ -547,6 +547,70 @@ export class SlackChannel implements Channel {
         this.opts.setState(stateKey, ts);
       }
     });
+
+    // Handle new member joining a channel
+    this.app.event('member_joined_channel', async ({ event }: any) => {
+      const userId = event.user;
+      const channelId = event.channel;
+      const chatJid = `${this.channelPrefix}${channelId}`;
+
+      const senderName = await this.resolveUserName(userId);
+
+      logger.info(
+        { userId, channelId, senderName, channel: this.name },
+        'member_joined_channel event',
+      );
+
+      // Notify via onChatMetadata for floor recalculation tracking
+      this.opts.onChatMetadata(chatJid, new Date().toISOString(), undefined, 'slack', true);
+
+      // Write floor change event to triage log
+      const triageDir = path.join(
+        process.env.HOME || '/Users/jibot',
+        'switchboard', 'ops', 'jibot', 'triage',
+      );
+      fs.mkdirSync(triageDir, { recursive: true });
+      const logPath = path.join(triageDir, 'floor-changes.jsonl');
+      const entry = JSON.stringify({
+        event: 'member_joined',
+        userId,
+        senderName,
+        channelId,
+        chatJid,
+        timestamp: new Date().toISOString(),
+        namespace: this.opts.namespace || 'default',
+      });
+      fs.appendFileSync(logPath, entry + '\n');
+    });
+
+    // Handle member leaving a channel
+    this.app.event('member_left_channel', async ({ event }: any) => {
+      const userId = event.user;
+      const channelId = event.channel;
+      const chatJid = `${this.channelPrefix}${channelId}`;
+
+      logger.info(
+        { userId, channelId, channel: this.name },
+        'member_left_channel event',
+      );
+
+      // Write floor change event to triage log
+      const triageDir = path.join(
+        process.env.HOME || '/Users/jibot',
+        'switchboard', 'ops', 'jibot', 'triage',
+      );
+      fs.mkdirSync(triageDir, { recursive: true });
+      const logPath = path.join(triageDir, 'floor-changes.jsonl');
+      const entry = JSON.stringify({
+        event: 'member_left',
+        userId,
+        channelId,
+        chatJid,
+        timestamp: new Date().toISOString(),
+        namespace: this.opts.namespace || 'default',
+      });
+      fs.appendFileSync(logPath, entry + '\n');
+    });
   }
 
   private async resolveUserName(userId: string): Promise<string> {

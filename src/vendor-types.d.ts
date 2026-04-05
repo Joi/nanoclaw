@@ -31,6 +31,7 @@ declare module '@slack/bolt' {
     stop(): Promise<void>;
     client: any;
     message(handler: any): void;
+    event(eventName: string, handler: any): void;
     error(handler: any): void;
   }
   export enum LogLevel {
