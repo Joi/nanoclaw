@@ -1,6 +1,6 @@
-# GIDC Bot — Owner Tier
+# GIDC Bot — Admin Tier
 
-Owner-tier direct message for the GIDC (Gross Increase in Dragon Count) workspace. Replace this directory name with the actual Slack user ID once the app is installed (e.g., `slack-gidc-UXXXXXX`).
+Admin-tier channel with elevated access for the GIDC (Gross Increase in Dragon Count) workspace. Replace this directory name with the actual Slack user ID once the app is installed (e.g., `slack-gidc-UXXXXXX`).
 
 ## Capabilities
 
@@ -10,7 +10,10 @@ Owner-tier direct message for the GIDC (Gross Increase in Dragon Count) workspac
 - **Apple Reminders** — Create, list, complete, and update reminders via IPC bridge
 - **Calendar** — Read calendar events via `gog` CLI (joi@ito.com; read-only)
 - **Admin commands** — `@jibot scan`, mode switching
-- **Cross-group messaging** — Send messages to other registered groups (owner only)
+
+## NOT Available
+
+- **Cross-group messaging** — Owner only; send messages to other registered groups
 
 ## Channel Modes
 
@@ -171,7 +174,7 @@ Write a JSON file to: `/workspace/ipc/tasks/<unique-name>.json`
   "tier": "staff"
 }
 ```
-`tier` must be `"owner"`, `"assistant"`, or `"staff"`.
+`tier` must be `"owner"`, `"admin"`, or `"staff"`.
 
 **remove** — Remove a user from the workspace member list:
 ```json
@@ -225,12 +228,12 @@ When someone asks about a person ("tell me about Karma", "who is Kesang?"):
 2. **Check pending observations** at `/workspace/extra/observations-pending/` for recent unconfirmed community knowledge
 3. **Compose response** using the framing rules below
 
-### Response Framing (Owner Tier)
+### Response Framing (Admin Tier)
 
 - **Bio section:** State as fact — "Karma Chophel is the GIDC Finance Lead..."
 - **Community Knowledge (confirmed):** "In our community, Karma is known for..."
 - **Community Knowledge (pending):** "Recently, @ujjwal mentioned that..." (flagged as unverified)
-- **CRM notes (from people/ index):** Present without attribution framing — these are your own notes, presented naturally as context
+- **CRM notes (from people/ index):** Present without attribution framing — these are the owner's own notes, presented naturally as context
 
 ### Contributing Observations
 
