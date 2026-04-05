@@ -264,7 +264,10 @@ async function buildContainerArgs(
 
   // Credential proxy injects API credentials — containers never see real secrets.
   // Point containers at the host's credential proxy via ANTHROPIC_BASE_URL.
+  // ANTHROPIC_API_KEY is set to a placeholder so Claude Code considers itself logged in;
+  // the proxy replaces it with the real key on every request.
   args.push('-e', 'ANTHROPIC_BASE_URL=http://host.docker.internal:10254');
+  args.push('-e', 'ANTHROPIC_API_KEY=proxy');
 
   // Try OneCLI as supplementary config (optional, often not installed)
   try {
