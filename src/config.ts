@@ -14,6 +14,10 @@ const envConfig = readEnvFile([
   'SLACK_3_APP_TOKEN',
   'SLACK_3_SIGNING_SECRET',
   'SLACK_3_NAMESPACE',
+  'SLACK_4_BOT_TOKEN',
+  'SLACK_4_APP_TOKEN',
+  'SLACK_4_SIGNING_SECRET',
+  'SLACK_4_NAMESPACE',
   'CONFIDENTIAL_ROOT',
 ]);
 
@@ -134,6 +138,12 @@ export const SLACK_3_BOT_TOKEN = process.env.SLACK_3_BOT_TOKEN || envConfig.SLAC
 export const SLACK_3_APP_TOKEN = process.env.SLACK_3_APP_TOKEN || envConfig.SLACK_3_APP_TOKEN || '';
 export const SLACK_3_SIGNING_SECRET = process.env.SLACK_3_SIGNING_SECRET || envConfig.SLACK_3_SIGNING_SECRET || '';
 export const SLACK_3_NAMESPACE = process.env.SLACK_3_NAMESPACE || envConfig.SLACK_3_NAMESPACE || '';
+
+// Fourth Slack workspace (joiito)
+export const SLACK_4_BOT_TOKEN = process.env.SLACK_4_BOT_TOKEN || envConfig.SLACK_4_BOT_TOKEN || '';
+export const SLACK_4_APP_TOKEN = process.env.SLACK_4_APP_TOKEN || envConfig.SLACK_4_APP_TOKEN || '';
+export const SLACK_4_SIGNING_SECRET = process.env.SLACK_4_SIGNING_SECRET || envConfig.SLACK_4_SIGNING_SECRET || '';
+export const SLACK_4_NAMESPACE = process.env.SLACK_4_NAMESPACE || envConfig.SLACK_4_NAMESPACE || '';
 
 // Confidential root directory for intake files
 export const CONFIDENTIAL_ROOT =

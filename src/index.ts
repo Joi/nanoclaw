@@ -18,6 +18,10 @@ import {
   SLACK_3_BOT_TOKEN,
   SLACK_3_NAMESPACE,
   SLACK_3_SIGNING_SECRET,
+  SLACK_4_APP_TOKEN,
+  SLACK_4_BOT_TOKEN,
+  SLACK_4_NAMESPACE,
+  SLACK_4_SIGNING_SECRET,
   TIMEZONE,
 } from './config.js';
 import './channels/index.js';
@@ -836,6 +840,24 @@ async function main(): Promise<void> {
       logger.info({ namespace: SLACK_3_NAMESPACE }, 'Slack 3 channel connected');
     } catch (err) {
       logger.error({ err, namespace: SLACK_3_NAMESPACE }, 'Failed to connect Slack 3 channel');
+    }
+  }
+
+  // Fourth Slack workspace — joiito (if configured)
+  if (SLACK_4_BOT_TOKEN && SLACK_4_APP_TOKEN && SLACK_4_NAMESPACE) {
+    const slack4 = new SlackChannel({
+      ...channelOpts,
+      slackBotToken: SLACK_4_BOT_TOKEN,
+      slackAppToken: SLACK_4_APP_TOKEN,
+      slackSigningSecret: SLACK_4_SIGNING_SECRET,
+      namespace: SLACK_4_NAMESPACE,
+    });
+    channels.push(slack4);
+    try {
+      await slack4.connect();
+      logger.info({ namespace: SLACK_4_NAMESPACE }, 'Slack 4 channel connected');
+    } catch (err) {
+      logger.error({ err, namespace: SLACK_4_NAMESPACE }, 'Failed to connect Slack 4 channel');
     }
   }
 
