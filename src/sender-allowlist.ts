@@ -5,7 +5,7 @@ import { logger } from './logger.js';
 
 export interface ChatAllowlistEntry {
   allow: '*' | string[];
-  mode: 'trigger' | 'drop';
+  mode: 'trigger' | 'drop' | 'allow';
 }
 
 export interface SenderAllowlistConfig {
@@ -26,7 +26,7 @@ function isValidEntry(entry: unknown): entry is ChatAllowlistEntry {
   const validAllow =
     e.allow === '*' ||
     (Array.isArray(e.allow) && e.allow.every((v) => typeof v === 'string'));
-  const validMode = e.mode === 'trigger' || e.mode === 'drop';
+  const validMode = e.mode === 'trigger' || e.mode === 'drop' || e.mode === 'allow';
   return validAllow && validMode;
 }
 
