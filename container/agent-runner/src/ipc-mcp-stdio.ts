@@ -44,7 +44,12 @@ server.tool(
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
   {
     text: z.string().describe('The message text to send'),
-    sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    sender: z
+      .string()
+      .optional()
+      .describe(
+        'Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.',
+      ),
   },
   async (args) => {
     const data: Record<string, string | undefined> = {
@@ -86,11 +91,39 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
 \u2022 once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
   {
-    prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-    schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
-    context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
-    target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
+    prompt: z
+      .string()
+      .describe(
+        'What the agent should do when the task runs. For isolated mode, include all necessary context here.',
+      ),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .describe(
+        'cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time',
+      ),
+    schedule_value: z
+      .string()
+      .describe(
+        'cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)',
+      ),
+    context_mode: z
+      .enum(['group', 'isolated'])
+      .default('group')
+      .describe(
+        'group=runs with chat history and memory, isolated=fresh session (include context in prompt)',
+      ),
+    target_group_jid: z
+      .string()
+      .optional()
+      .describe(
+        '(Main group only) JID of the group to schedule the task for. Defaults to the current group.',
+      ),
+    script: z
+      .string()
+      .optional()
+      .describe(
+        'Optional bash script to run before waking the agent. Script must output JSON on the last line of stdout: { "wakeAgent": boolean, "data"?: any }. If wakeAgent is false, the agent is not called. Test your script with bash -c "..." before scheduling.',
+      ),
   },
   async (args) => {
     // Validate schedule_value before writing IPC
@@ -99,7 +132,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         CronExpressionParser.parse(args.schedule_value);
       } catch {
         return {
-          content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).`,
+            },
+          ],
           isError: true,
         };
       }
@@ -107,28 +145,47 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).`,
+            },
+          ],
           isError: true,
         };
       }
     } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+      if (
+        /[Zz]$/.test(args.schedule_value) ||
+        /[+-]\d{2}:\d{2}$/.test(args.schedule_value)
+      ) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
         };
       }
       const date = new Date(args.schedule_value);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".`,
+            },
+          ],
           isError: true,
         };
       }
     }
 
     // Non-main groups can only schedule for themselves
-    const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
+    const targetJid =
+      isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
     const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -136,6 +193,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       type: 'schedule_task',
       taskId,
       prompt: args.prompt,
+      script: args.script || undefined,
       schedule_type: args.schedule_type,
       schedule_value: args.schedule_value,
       context_mode: args.context_mode || 'group',
@@ -147,7 +205,12 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${taskId} scheduled: ${args.schedule_type} - ${args.schedule_value}`,
+        },
+      ],
     };
   },
 );
@@ -161,30 +224,56 @@ server.tool(
 
     try {
       if (!fs.existsSync(tasksFile)) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+        return {
+          content: [
+            { type: 'text' as const, text: 'No scheduled tasks found.' },
+          ],
+        };
       }
 
       const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
 
       const tasks = isMain
         ? allTasks
-        : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
+        : allTasks.filter(
+            (t: { groupFolder: string }) => t.groupFolder === groupFolder,
+          );
 
       if (tasks.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
+        return {
+          content: [
+            { type: 'text' as const, text: 'No scheduled tasks found.' },
+          ],
+        };
       }
 
       const formatted = tasks
         .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
+          (t: {
+            id: string;
+            prompt: string;
+            schedule_type: string;
+            schedule_value: string;
+            status: string;
+            next_run: string;
+          }) =>
             `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
         )
         .join('\n');
 
-      return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
+      return {
+        content: [
+          { type: 'text' as const, text: `Scheduled tasks:\n${formatted}` },
+        ],
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        ],
       };
     }
   },
@@ -205,7 +294,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} pause requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -224,7 +320,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} resume requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -243,7 +346,14 @@ server.tool(
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} cancellation requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -253,18 +363,38 @@ server.tool(
   {
     task_id: z.string().describe('The task ID to update'),
     prompt: z.string().optional().describe('New prompt for the task'),
-    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
-    schedule_value: z.string().optional().describe('New schedule value (see schedule_task for format)'),
+    schedule_type: z
+      .enum(['cron', 'interval', 'once'])
+      .optional()
+      .describe('New schedule type'),
+    schedule_value: z
+      .string()
+      .optional()
+      .describe('New schedule value (see schedule_task for format)'),
+    script: z
+      .string()
+      .optional()
+      .describe(
+        'New script for the task. Set to empty string to remove the script.',
+      ),
   },
   async (args) => {
     // Validate schedule_value if provided
-    if (args.schedule_type === 'cron' || (!args.schedule_type && args.schedule_value)) {
+    if (
+      args.schedule_type === 'cron' ||
+      (!args.schedule_type && args.schedule_value)
+    ) {
       if (args.schedule_value) {
         try {
           CronExpressionParser.parse(args.schedule_value);
         } catch {
           return {
-            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}".` }],
+            content: [
+              {
+                type: 'text' as const,
+                text: `Invalid cron: "${args.schedule_value}".`,
+              },
+            ],
             isError: true,
           };
         }
@@ -274,7 +404,12 @@ server.tool(
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}".` }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Invalid interval: "${args.schedule_value}".`,
+            },
+          ],
           isError: true,
         };
       }
@@ -288,12 +423,22 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
     if (args.prompt !== undefined) data.prompt = args.prompt;
-    if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
-    if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+    if (args.script !== undefined) data.script = args.script;
+    if (args.schedule_type !== undefined)
+      data.schedule_type = args.schedule_type;
+    if (args.schedule_value !== undefined)
+      data.schedule_value = args.schedule_value;
 
     writeIpcFile(TASKS_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested.` }] };
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Task ${args.task_id} update requested.`,
+        },
+      ],
+    };
   },
 );
 
@@ -303,15 +448,34 @@ server.tool(
 
 Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
   {
-    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
+    jid: z
+      .string()
+      .describe(
+        'The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")',
+      ),
     name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
+    folder: z
+      .string()
+      .describe(
+        'Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")',
+      ),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    requiresTrigger: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether messages must start with the trigger word. Default: false (respond to all messages). Set to true for busy groups with many participants where you only want the agent to respond when explicitly mentioned.',
+      ),
   },
   async (args) => {
     if (!isMain) {
       return {
-        content: [{ type: 'text' as const, text: 'Only the main group can register new groups.' }],
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can register new groups.',
+          },
+        ],
         isError: true,
       };
     }
@@ -322,399 +486,22 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       name: args.name,
       folder: args.folder,
       trigger: args.trigger,
+      requiresTrigger: args.requiresTrigger ?? false,
       timestamp: new Date().toISOString(),
     };
 
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+      content: [
+        {
+          type: 'text' as const,
+          text: `Group "${args.name}" registered. It will start receiving messages immediately.`,
+        },
+      ],
     };
   },
 );
-
-
-server.tool(
-  'link_account',
-  `Link a channel account (JID) to an existing group folder so they share the same session, CLAUDE.md, and context. Main group only.
-
-Use this when the same user has multiple channel accounts (e.g., Signal DM and Slack DM) that should share one agent folder.
-The target folder must already have at least one registered group — privileges (reminders, bookmarks) are copied from the existing entry.`,
-  {
-    jid: z.string().describe('The JID to link (e.g., "slack:U02GY1YS33Q", "sig:+1234567890")'),
-    target_folder: z.string().describe('The existing folder name to link to (e.g., "joi-dm")'),
-    name: z.string().optional().describe('Display name for this account (defaults to existing name)'),
-    requires_trigger: z.boolean().optional().describe('Whether this account needs a trigger word (defaults to existing setting)'),
-  },
-  async (args) => {
-    if (!isMain) {
-      return {
-        content: [{ type: 'text' as const, text: 'Only the main group can link accounts.' }],
-        isError: true,
-      };
-    }
-
-    const data: Record<string, unknown> = {
-      type: 'link_account',
-      jid: args.jid,
-      targetFolder: args.target_folder,
-      timestamp: new Date().toISOString(),
-    };
-    if (args.name) data.name = args.name;
-    if (args.requires_trigger !== undefined) data.requiresTrigger = args.requires_trigger;
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [{ type: 'text' as const, text: `Account "${args.jid}" linked to folder "${args.target_folder}".` }],
-    };
-  },
-);
-
-// ── Apple Reminders tools (conditional on NANOCLAW_REMINDERS_ACCESS) ──
-
-const hasRemindersAccess = process.env.NANOCLAW_REMINDERS_ACCESS === '1';
-
-if (hasRemindersAccess) {
-  const REMINDERS_DIR = path.join(IPC_DIR, 'reminders');
-
-  function writeRemindersIpc(data: object): string {
-    fs.mkdirSync(REMINDERS_DIR, { recursive: true });
-    const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-    const filepath = path.join(REMINDERS_DIR, filename);
-    const tempPath = `${filepath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-    fs.renameSync(tempPath, filepath);
-    return filename;
-  }
-
-  function readRemindersSnapshot(): object | null {
-    const snapshotPath = path.join(IPC_DIR, 'reminders_snapshot.json');
-    try {
-      if (fs.existsSync(snapshotPath)) {
-        return JSON.parse(fs.readFileSync(snapshotPath, 'utf-8'));
-      }
-    } catch {}
-    return null;
-  }
-
-  server.tool(
-    'list_reminders',
-    `List Apple Reminders. Shows all incomplete reminders across synced lists (Inbox, Next Actions, Waiting For, Someday/Maybe, Joi/Mika To Do).
-Reminders are sorted with overdue items first, then by due date. Each reminder has an id, title, list_name, due_date, priority, and notes.`,
-    {
-      list_name: z.string().optional().describe('Filter to a specific list (e.g., "Inbox", "Next Actions", "Waiting For")'),
-    },
-    async (args) => {
-      const snapshot = readRemindersSnapshot();
-      if (!snapshot) {
-        return {
-          content: [{ type: 'text' as const, text: 'Reminders data not available. It may still be loading.' }],
-        };
-      }
-
-      const data = snapshot as { reminders?: Array<Record<string, unknown>>; by_list?: Record<string, Array<Record<string, unknown>>>; total?: number };
-
-      if (args.list_name) {
-        const byList = data.by_list || {};
-        // Case-insensitive match
-        const key = Object.keys(byList).find(k => k.toLowerCase() === args.list_name!.toLowerCase());
-        if (!key) {
-          const available = Object.keys(byList).join(', ');
-          return {
-            content: [{ type: 'text' as const, text: `List "${args.list_name}" not found. Available: ${available}` }],
-          };
-        }
-        const items = byList[key];
-        const formatted = items.map((r: Record<string, unknown>) =>
-          `- [${r.priority ? '!' : ' '}] ${r.title}${r.due_date ? ` (due: ${r.due_date})` : ''}${r.notes ? ` — ${(r.notes as string).slice(0, 50)}` : ''}
-  ID: ${r.id}`
-        ).join('\n');
-        return {
-          content: [{ type: 'text' as const, text: `**${key}** (${items.length} items):\n${formatted}` }],
-        };
-      }
-
-      // Show all lists summary
-      const byList = data.by_list || {};
-      let output = `**All Reminders** (${data.total || 0} total)\n\n`;
-      for (const [listName, items] of Object.entries(byList)) {
-        output += `**${listName}** (${(items as unknown[]).length}):\n`;
-        for (const r of items as Array<Record<string, unknown>>) {
-          output += `- ${r.title}${r.due_date ? ` (due: ${r.due_date})` : ''}\n  ID: ${r.id}\n`;
-        }
-        output += '\n';
-      }
-      return { content: [{ type: 'text' as const, text: output }] };
-    },
-  );
-
-  server.tool(
-    'create_reminder',
-    'Create a new Apple Reminder. Defaults to the Inbox list.',
-    {
-      title: z.string().describe('The reminder title'),
-      list_name: z.string().default('Inbox').describe('Which list (Inbox, Next Actions, Waiting For, Someday/Maybe, Joi/Mika To Do)'),
-      due_date: z.string().optional().describe('Due date in YYYY-MM-DD format'),
-      notes: z.string().optional().describe('Additional notes'),
-      priority: z.number().optional().describe('Priority: 0=none, 1=high, 5=medium, 9=low'),
-    },
-    async (args) => {
-      writeRemindersIpc({
-        operation: 'create_reminder',
-        params: {
-          title: args.title,
-          list_name: args.list_name,
-          due_date: args.due_date,
-          notes: args.notes,
-          priority: args.priority || 0,
-        },
-      });
-      return {
-        content: [{ type: 'text' as const, text: `Reminder "${args.title}" created in ${args.list_name}.` }],
-      };
-    },
-  );
-
-  server.tool(
-    'complete_reminder',
-    'Mark an Apple Reminder as complete. Use the ID from list_reminders, or match by title.',
-    {
-      reminder_id: z.string().optional().describe('The reminder ID (from list_reminders)'),
-      title_match: z.string().optional().describe('Partial title match (case-insensitive)'),
-    },
-    async (args) => {
-      if (!args.reminder_id && !args.title_match) {
-        return {
-          content: [{ type: 'text' as const, text: 'Provide either reminder_id or title_match.' }],
-          isError: true,
-        };
-      }
-      writeRemindersIpc({
-        operation: 'complete_reminder',
-        params: {
-          reminder_id: args.reminder_id,
-          title_match: args.title_match,
-        },
-      });
-      return {
-        content: [{ type: 'text' as const, text: `Reminder completion requested.` }],
-      };
-    },
-  );
-
-  server.tool(
-    'update_reminder',
-    'Update an existing Apple Reminder (title, due date, notes, priority, or move to different list).',
-    {
-      reminder_id: z.string().optional().describe('The reminder ID'),
-      title_match: z.string().optional().describe('Partial title match to find the reminder'),
-      title: z.string().optional().describe('New title'),
-      due_date: z.string().optional().describe('New due date (YYYY-MM-DD or empty to clear)'),
-      notes: z.string().optional().describe('New notes'),
-      priority: z.number().optional().describe('New priority: 0=none, 1=high, 5=medium, 9=low'),
-      list_name: z.string().optional().describe('Move to this list'),
-    },
-    async (args) => {
-      if (!args.reminder_id && !args.title_match) {
-        return {
-          content: [{ type: 'text' as const, text: 'Provide either reminder_id or title_match.' }],
-          isError: true,
-        };
-      }
-      const params: Record<string, unknown> = {};
-      if (args.reminder_id) params.reminder_id = args.reminder_id;
-      if (args.title_match) params.title_match = args.title_match;
-      if (args.title !== undefined) params.title = args.title;
-      if (args.due_date !== undefined) params.due_date = args.due_date;
-      if (args.notes !== undefined) params.notes = args.notes;
-      if (args.priority !== undefined) params.priority = args.priority;
-      if (args.list_name !== undefined) params.list_name = args.list_name;
-
-      writeRemindersIpc({
-        operation: 'update_reminder',
-        params,
-      });
-      return {
-        content: [{ type: 'text' as const, text: 'Reminder update requested.' }],
-      };
-    },
-  );
-}
-
-// ── Bookmark tools (conditional on NANOCLAW_BOOKMARKS_ACCESS) ──
-
-const hasBookmarksAccess = process.env.NANOCLAW_BOOKMARKS_ACCESS === '1';
-
-if (hasBookmarksAccess) {
-  const BOOKMARKS_DIR = path.join(IPC_DIR, 'bookmarks');
-
-  function writeBookmarkIpc(data: object): { reqFile: string; respFile: string } {
-    fs.mkdirSync(BOOKMARKS_DIR, { recursive: true });
-    const ts = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const reqFile = `req-${ts}.json`;
-    const respFile = `resp-${ts}.json`;
-    const filepath = path.join(BOOKMARKS_DIR, reqFile);
-    const tempPath = `${filepath}.tmp`;
-    fs.writeFileSync(tempPath, JSON.stringify({ ...data, responseFile: respFile }, null, 2));
-    fs.renameSync(tempPath, filepath);
-    return { reqFile, respFile };
-  }
-
-  async function waitForResponse(respFile: string, timeoutMs: number = 120_000): Promise<object> {
-    const respPath = path.join(BOOKMARKS_DIR, respFile);
-    const start = Date.now();
-    const pollInterval = 500;
-    while (Date.now() - start < timeoutMs) {
-      if (fs.existsSync(respPath)) {
-        const content = fs.readFileSync(respPath, 'utf-8');
-        fs.unlinkSync(respPath);
-        return JSON.parse(content);
-      }
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
-    }
-    return { error: `Bookmark operation timed out after ${timeoutMs / 1000}s` };
-  }
-
-  server.tool(
-    'bookmark_url',
-    `Bookmark a URL for knowledge extraction. The bookmark service fetches the page, extracts clean markdown content, classifies it, and saves it to the knowledge base.
-Extraction can take 30-60 seconds. The result includes the file path, title, and classification.`,
-    {
-      url: z.string().describe('The URL to bookmark'),
-      hint: z.string().optional().describe('Classification hint: person, concept, organization, reference, event, or project'),
-    },
-    async (args) => {
-      const { respFile } = writeBookmarkIpc({
-        operation: 'bookmark_url',
-        params: { url: args.url, hint: args.hint },
-      });
-
-      const result = await waitForResponse(respFile);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-      };
-    },
-  );
-
-  server.tool(
-    'bookmark_health',
-    'Check if the bookmark extraction service is healthy and available.',
-    {},
-    async () => {
-      const { respFile } = writeBookmarkIpc({
-        operation: 'bookmark_health',
-      });
-
-      const result = await waitForResponse(respFile, 15_000);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-      };
-    },
-  );
-
-  server.tool(
-    'bookmark_recent',
-    'List recently bookmarked URLs and their extraction status.',
-    {},
-    async () => {
-      const { respFile } = writeBookmarkIpc({
-        operation: 'bookmark_recent',
-      });
-
-      const result = await waitForResponse(respFile, 15_000);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
-      };
-    },
-  );
-}
-
-// ── Email tools (conditional on NANOCLAW_EMAIL_ACCESS) ──
-
-const hasEmailAccess = process.env.NANOCLAW_EMAIL_ACCESS === '1';
-
-if (hasEmailAccess) {
-  const { execFileSync } = await import('child_process');
-  const EMAIL_ACCOUNT = 'jibot@ito.com';
-
-  server.tool(
-    'send_email',
-    `Send an email from ${EMAIL_ACCOUNT}. Always search contacts first if you only have a name (not an email address).`,
-    {
-      to: z.string().describe('Recipient email address'),
-      subject: z.string().describe('Email subject line'),
-      body: z.string().describe('Email body text'),
-      cc: z.string().optional().describe('CC email address(es), comma-separated'),
-      bcc: z.string().optional().describe('BCC email address(es), comma-separated'),
-    },
-    async (args) => {
-      try {
-        const cmdArgs = [
-          'gmail', 'send',
-          '--account', EMAIL_ACCOUNT,
-          '--to', args.to,
-          '--subject', args.subject,
-          '--body', args.body,
-          '--force', '--no-input',
-        ];
-        if (args.cc) {
-          cmdArgs.push('--cc', args.cc);
-        }
-        if (args.bcc) {
-          cmdArgs.push('--bcc', args.bcc);
-        }
-
-        const result = execFileSync('gog', cmdArgs, {
-          encoding: 'utf-8',
-          timeout: 30_000,
-        }).trim();
-
-        return {
-          content: [{ type: 'text' as const, text: `Email sent to ${args.to}.\n${result}` }],
-        };
-      } catch (err) {
-        const message = err instanceof Error ? (err as { stderr?: string }).stderr || err.message : String(err);
-        return {
-          content: [{ type: 'text' as const, text: `Failed to send email: ${message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  server.tool(
-    'search_contacts',
-    `Search Google Contacts for a person's name or email. Use this to find the correct email address before sending an email.`,
-    {
-      query: z.string().describe('Name or email to search for'),
-    },
-    async (args) => {
-      try {
-        const result = execFileSync(
-          'gog', ['contacts', 'search', args.query, '--account', EMAIL_ACCOUNT, '-j'],
-          { encoding: 'utf-8', timeout: 15_000 },
-        ).trim();
-
-        if (!result) {
-          return {
-            content: [{ type: 'text' as const, text: `No contacts found for "${args.query}".` }],
-          };
-        }
-
-        return {
-          content: [{ type: 'text' as const, text: result }],
-        };
-      } catch (err) {
-        const message = err instanceof Error ? (err as { stderr?: string }).stderr || err.message : String(err);
-        return {
-          content: [{ type: 'text' as const, text: `Failed to search contacts: ${message}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-}
 
 // Start the stdio transport
 const transport = new StdioServerTransport();

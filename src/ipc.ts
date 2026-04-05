@@ -5,11 +5,9 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getRegisteredGroupsByFolder, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { processBookmarkIpc } from './bookmarks.js';
-import { processRemindersIpc } from './reminders.js';
 import { addAllowlistEntry, removeAllowlistEntry } from './sender-allowlist.js';
 import { RegisteredGroup } from './types.js';
 
@@ -26,6 +24,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  onTasksChanged: () => void;
 }
 
 let ipcWatcherRunning = false;
@@ -95,37 +94,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
-              } else if (data.type === "file" && data.chatJid && data.hostPath && data.filename) {
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  // Security: only allow files from approved base paths
-                  const resolvedPath = path.resolve(data.hostPath as string);
-                  const allowedBases = [
-                    "/Users/jibot/switchboard/confidential/",
-                    "/Users/jibot/nanoclaw/groups/",
-                  ];
-                  const isAllowed = allowedBases.some((base) => resolvedPath.startsWith(base));
-                  if (isAllowed && fs.existsSync(resolvedPath)) {
-                    await deps.sendFile(data.chatJid, resolvedPath, data.filename as string);
-                    logger.info(
-                      { chatJid: data.chatJid, filename: data.filename, sourceGroup },
-                      "IPC file sent",
-                    );
-                  } else {
-                    logger.warn(
-                      { hostPath: data.hostPath, sourceGroup },
-                      "IPC file request blocked: path not allowed or not found",
-                    );
-                  }
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    "Unauthorized IPC file attempt blocked",
-                  );
-                }
               }
               fs.unlinkSync(filePath);
             } catch (err) {
@@ -179,80 +147,6 @@ export function startIpcWatcher(deps: IpcDeps): void {
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
-
-      // Process reminders from this group's IPC directory
-      const remindersDir = path.join(ipcBaseDir, sourceGroup, 'reminders');
-      try {
-        if (fs.existsSync(remindersDir)) {
-          const reminderFiles = fs
-            .readdirSync(remindersDir)
-            .filter((f) => f.endsWith('.json'));
-          for (const file of reminderFiles) {
-            const filePath = path.join(remindersDir, file);
-            try {
-              processRemindersIpc(filePath, sourceGroup);
-              fs.unlinkSync(filePath);
-              logger.info(
-                { file, sourceGroup },
-                'IPC reminder processed',
-              );
-            } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
-                'Error processing IPC reminder',
-              );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
-            }
-          }
-        }
-      } catch (err) {
-        logger.error(
-          { err, sourceGroup },
-          'Error reading IPC reminders directory',
-        );
-      }
-
-      // Process bookmarks from this group's IPC directory
-      const bookmarksDir = path.join(ipcBaseDir, sourceGroup, 'bookmarks');
-      try {
-        if (fs.existsSync(bookmarksDir)) {
-          const bookmarkFiles = fs
-            .readdirSync(bookmarksDir)
-            .filter((f) => f.startsWith('req-') && f.endsWith('.json'));
-          for (const file of bookmarkFiles) {
-            const filePath = path.join(bookmarksDir, file);
-            try {
-              await processBookmarkIpc(filePath);
-              fs.unlinkSync(filePath);
-              logger.info(
-                { file, sourceGroup },
-                'IPC bookmark processed',
-              );
-            } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
-                'Error processing IPC bookmark',
-              );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
-            }
-          }
-        }
-      } catch (err) {
-        logger.error(
-          { err, sourceGroup },
-          'Error reading IPC bookmarks directory',
-        );
-      }
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
@@ -270,17 +164,17 @@ export async function processTaskIpc(
     schedule_type?: string;
     schedule_value?: string;
     context_mode?: string;
+    script?: string;
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
-    // For register_group / link_account
+    // For register_group
     jid?: string;
     name?: string;
     folder?: string;
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
-    targetFolder?: string;
     // For user_manage
     action?: string;
     slackUserId?: string;
@@ -374,6 +268,7 @@ export async function processTaskIpc(
           group_folder: targetFolder,
           chat_jid: targetJid,
           prompt: data.prompt,
+          script: data.script || null,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
@@ -385,6 +280,7 @@ export async function processTaskIpc(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
+        deps.onTasksChanged();
       }
       break;
 
@@ -397,6 +293,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task paused via IPC',
           );
+          deps.onTasksChanged();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -415,6 +312,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task resumed via IPC',
           );
+          deps.onTasksChanged();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -433,6 +331,7 @@ export async function processTaskIpc(
             { taskId: data.taskId, sourceGroup },
             'Task cancelled via IPC',
           );
+          deps.onTasksChanged();
         } else {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
@@ -462,6 +361,7 @@ export async function processTaskIpc(
 
         const updates: Parameters<typeof updateTask>[1] = {};
         if (data.prompt !== undefined) updates.prompt = data.prompt;
+        if (data.script !== undefined) updates.script = data.script || null;
         if (data.schedule_type !== undefined)
           updates.schedule_type = data.schedule_type as
             | 'cron'
@@ -503,6 +403,7 @@ export async function processTaskIpc(
           { taskId: data.taskId, sourceGroup, updates },
           'Task updated via IPC',
         );
+        deps.onTasksChanged();
       }
       break;
 
@@ -547,7 +448,10 @@ export async function processTaskIpc(
           );
           break;
         }
-        // Defense in depth: agent cannot set isMain via IPC
+        // Defense in depth: agent cannot set isMain via IPC.
+        // Preserve isMain from the existing registration so IPC config
+        // updates (e.g. adding additionalMounts) don't strip the flag.
+        const existingGroup = registeredGroups[data.jid];
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
@@ -555,6 +459,7 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
+          isMain: existingGroup?.isMain,
         });
       } else {
         logger.warn(
@@ -564,58 +469,8 @@ export async function processTaskIpc(
       }
       break;
 
-    case 'link_account':
-      // Only main group can link accounts
-      if (!isMain) {
-        logger.warn(
-          { sourceGroup },
-          'Unauthorized link_account attempt blocked',
-        );
-        break;
-      }
-      if (data.jid && data.targetFolder) {
-        if (!isValidGroupFolder(data.targetFolder)) {
-          logger.warn(
-            { sourceGroup, folder: data.targetFolder },
-            'Invalid link_account request - unsafe folder name',
-          );
-          break;
-        }
-        // Look up an existing group with this folder to copy privileges
-        const siblings = getRegisteredGroupsByFolder(data.targetFolder);
-        if (siblings.length === 0) {
-          logger.warn(
-            { targetFolder: data.targetFolder },
-            'link_account: no existing group with target folder',
-          );
-          break;
-        }
-        const template = siblings[0];
-        deps.registerGroup(data.jid, {
-          name: data.name || template.name,
-          folder: data.targetFolder,
-          trigger: template.trigger,
-          added_at: new Date().toISOString(),
-          containerConfig: template.containerConfig,
-          requiresTrigger: data.requiresTrigger ?? template.requiresTrigger,
-          remindersAccess: template.remindersAccess,
-          bookmarksAccess: template.bookmarksAccess,
-        });
-        logger.info(
-          { jid: data.jid, targetFolder: data.targetFolder },
-          'Account linked via IPC',
-        );
-      } else {
-        logger.warn(
-          { data },
-          'Invalid link_account request - missing jid or targetFolder',
-        );
-      }
-      break;
-
     case 'user_manage': {
-      // Only owner/assistant (main or elevated) can manage users
-      // Security: isMain check prevents staff groups from escalating
+      // Only main group can manage users
       if (!isMain) {
         logger.warn(
           { sourceGroup },
@@ -624,57 +479,57 @@ export async function processTaskIpc(
         break;
       }
 
-      const { action, slackUserId, tier, namespace, name } = data;
-
+      const { action, slackUserId, namespace, tier, name } = data;
       if (!slackUserId || !namespace) {
-        logger.warn({ data }, 'user_manage: missing slackUserId or namespace');
+        logger.warn(
+          { sourceGroup, action },
+          'user_manage: missing slackUserId or namespace',
+        );
         break;
       }
 
       const userJid = `slack:${namespace}:${slackUserId}`;
 
       if (action === 'add') {
-        if (!tier || !['owner', 'assistant', 'staff'].includes(tier)) {
-          logger.warn({ tier }, 'user_manage: invalid tier');
+        const validTiers = ['staff', 'owner', 'assistant'];
+        if (!tier || !validTiers.includes(tier)) {
+          logger.warn(
+            { sourceGroup, tier },
+            'user_manage: invalid tier',
+          );
           break;
         }
 
-        const templateFolder = `gidc-template-${tier}`;
-        const siblings = getRegisteredGroupsByFolder(templateFolder);
-        if (siblings.length === 0) {
-          logger.info(
-            { templateFolder, tier },
-            'user_manage: using template folder directly',
-          );
-        }
-
-        const isOwnerTier = tier === 'owner';
-        const isAssistantTier = tier === 'assistant';
-        const isAdminTier = isOwnerTier || isAssistantTier;
+        const isAdmin = tier === 'owner' || tier === 'assistant';
+        const groupName = name || `GIDC ${tier} (${slackUserId})`;
 
         deps.registerGroup(userJid, {
-          name: name || `GIDC ${tier} (${slackUserId})`,
-          folder: templateFolder,
+          name: groupName,
+          folder: `gidc-template-${tier}`,
           trigger: '@gibot',
           added_at: new Date().toISOString(),
           requiresTrigger: false,
-          remindersAccess: isAdminTier,
-          calendarAccess: isAdminTier,
+          remindersAccess: isAdmin,
+          calendarAccess: isAdmin,
         });
 
         addAllowlistEntry(userJid, { allow: '*', mode: 'trigger' });
 
         logger.info(
-          { userJid, tier, name },
-          'user_manage: user added',
+          { userJid, tier, sourceGroup },
+          'User added via IPC user_manage',
         );
       } else if (action === 'remove') {
         removeAllowlistEntry(userJid);
-        // Don't unregister from DB — allowlist removal is sufficient to block.
-        // DB entry becomes dormant. Safer than deleting DB rows.
-        logger.info({ userJid }, 'user_manage: user removed');
+        logger.info(
+          { userJid, sourceGroup },
+          'User removed via IPC user_manage',
+        );
       } else {
-        logger.warn({ action }, 'user_manage: unknown action');
+        logger.warn(
+          { action, sourceGroup },
+          'user_manage: unknown action',
+        );
       }
       break;
     }

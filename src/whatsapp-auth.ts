@@ -83,7 +83,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     }, 3000);
   }
 
-  sock.ev.on('connection.update', (update) => {
+  sock.ev.on('connection.update', (update: any) => {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {

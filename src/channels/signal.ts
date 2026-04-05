@@ -159,7 +159,7 @@ export class SignalChannel implements Channel {
     const baseUrl = opts.signalCliUrl.replace(/\/+$/, '');
     this.rpcUrl = `${baseUrl}/api/v1/rpc`;
     this.account = opts.signalAccount;
-    this.botUuid = opts.botUuid || "";
+    this.botUuid = opts.botUuid || process.env.SIGNAL_BOT_UUID || "2e28a309-9ead-4cf4-9186-a5d133d50e70";
   }
 
   async connect(): Promise<void> {

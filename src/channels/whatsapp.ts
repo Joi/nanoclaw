@@ -69,7 +69,7 @@ export class WhatsAppChannel implements Channel {
       browser: Browsers.macOS('Chrome'),
     });
 
-    this.sock.ev.on('connection.update', (update) => {
+    this.sock.ev.on('connection.update', (update: any) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -112,7 +112,7 @@ export class WhatsAppChannel implements Channel {
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
-        this.sock.sendPresenceUpdate('available').catch((err) => {
+        this.sock.sendPresenceUpdate('available').catch((err: any) => {
           logger.warn({ err }, 'Failed to send presence update');
         });
 
@@ -155,7 +155,7 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('creds.update', saveCreds);
 
-    this.sock.ev.on('messages.upsert', async ({ messages }) => {
+    this.sock.ev.on('messages.upsert', async ({ messages }: { messages: any[] }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
@@ -333,7 +333,7 @@ export class WhatsAppChannel implements Channel {
       const groups = await this.sock.groupFetchAllParticipating();
 
       let count = 0;
-      for (const [jid, metadata] of Object.entries(groups)) {
+      for (const [jid, metadata] of Object.entries(groups) as [string, any][]) {
         if (metadata.subject) {
           updateChatName(jid, metadata.subject);
           count++;

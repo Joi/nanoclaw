@@ -72,7 +72,7 @@ export class SlackChannel implements Channel {
 
   async connect(): Promise<void> {
     // Global error handler for Bolt
-    this.app.error(async (error) => {
+    this.app.error(async (error: any) => {
       logger.error({ err: error, channel: this.name }, 'Slack Bolt app error');
     });
 
@@ -229,7 +229,7 @@ export class SlackChannel implements Channel {
     });
 
     const messages = (result.messages || [])
-      .filter(m => {
+      .filter((m: any) => {
         // Skip bot messages and our own messages
         if (m.bot_id) return false;
         if (!m.user) return false;
@@ -470,7 +470,7 @@ export class SlackChannel implements Channel {
 
   private setupListeners(): void {
     // Listen to all message events
-    this.app.message(async ({ message }) => {
+    this.app.message(async ({ message }: { message: any }) => {
       // Filter out bot messages and subtypes (edits, deletes, etc.)
       // Allow file_share subtype since it contains text + attached files
       const msg = message as unknown as Record<string, unknown>;

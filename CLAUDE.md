@@ -4,22 +4,31 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process that connects to multiple channels (WhatsApp, Signal, Slack, Telegram, Email), routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/index.ts` | Orchestrator: state, message loop, agent invocation, GIDC wiring |
+| `src/channels/whatsapp.ts` | WhatsApp connection (baileys v6), auth, media download |
+| `src/channels/signal.ts` | Signal via signal-cli REST API, mention expansion |
+| `src/channels/slack.ts` | Slack via Bolt SDK, PDF extraction |
+| `src/channels/telegram.ts` | Telegram via grammY |
+| `src/channels/email.ts` | Email channel via gog CLI |
+| `src/channels/registry.ts` | Channel factory registry (upstream pattern) |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/format.ts` | Markdown-to-Signal and Markdown-to-Slack formatting |
+| `src/config.ts` | Trigger pattern, paths, intervals, channel tokens |
+| `src/container-runner.ts` | Spawns agent containers with mounts, QMD MCP config |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
+| `src/sender-allowlist.ts` | Per-chat sender allowlist with add/remove |
+| `src/intake.ts` | GIDC intake file writing to workstream dirs |
+| `src/gidc-commands.ts` | GIDC slash commands (mode, scan) |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `container/skills/` | Agent skills synced into containers |
 
 ## Skills
 

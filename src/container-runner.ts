@@ -2,34 +2,33 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
-import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
-  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { detectAuthMode } from './credential-proxy.js';
+import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+const onecli = new OneCLI({ url: ONECLI_URL });
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -43,11 +42,10 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  secrets?: Record<string, string>;
+  script?: string;
   remindersAccess?: boolean;
   bookmarksAccess?: boolean;
   emailAccess?: boolean;
-  calendarAccess?: boolean;
 }
 
 export interface ContainerOutput {
@@ -73,7 +71,7 @@ function buildVolumeMounts(
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
+    // (store, group folder, IPC, .claude/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
@@ -84,7 +82,7 @@ function buildVolumeMounts(
     });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the credential proxy, never exposed to containers.
+    // Credentials are injected by the OneCLI gateway, never exposed to containers.
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
@@ -93,6 +91,15 @@ function buildVolumeMounts(
         readonly: true,
       });
     }
+
+    // Main gets writable access to the store (SQLite DB) so it can
+    // query and write to the database directly.
+    const storeDir = path.join(projectRoot, 'store');
+    mounts.push({
+      hostPath: storeDir,
+      containerPath: '/workspace/project/store',
+      readonly: false,
+    });
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -130,34 +137,32 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  const settingsObj: Record<string, unknown> = {
-    env: {
-      // Enable agent swarms (subagent orchestration)
-      // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-      // Load CLAUDE.md from additional mounted directories
-      // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-      // Enable Claude's memory feature (persists user preferences between sessions)
-      // https://code.claude.com/docs/en/memory#manage-auto-memory
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-    },
-  };
-  if (group.intakeAccess || group.fileServingAccess) {
-    settingsObj.mcpServers = {
-      qmd: {
-        // QMD MCP server: connect via socat to the host-running QMD MCP server
-        // (com.jibot.qmd-confidential on jibotmac, supergateway streamableHttp :7333)
-        command: "/bin/sh",
-        args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
+  if (!fs.existsSync(settingsFile)) {
+    const settingsObj: Record<string, unknown> = {
+      env: {
+        // Enable agent swarms (subagent orchestration)
+        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        // Load CLAUDE.md from additional mounted directories
+        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+        // Enable Claude's memory feature (persists user preferences between sessions)
+        // https://code.claude.com/docs/en/memory#manage-auto-memory
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
       },
     };
-  }
-  // One-time write: settings.json is not updated after creation.
-  // To apply access changes (e.g. intakeAccess -> qmd MCP server),
-  // delete the file -- it will be regenerated on next container start.
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, JSON.stringify(settingsObj, null, 2) + '\n');
+    if (group.intakeAccess || group.fileServingAccess) {
+      settingsObj.mcpServers = {
+        qmd: {
+          command: '/bin/sh',
+          args: ['-c', 'exec socat STDIO TCP:host.docker.internal:7333'],
+        },
+      };
+    }
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify(settingsObj, null, 2) + '\n',
+    );
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -183,8 +188,6 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'reminders'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'bookmarks'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -206,88 +209,23 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
+    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
+    const needsCopy =
+      !fs.existsSync(groupAgentRunnerDir) ||
+      !fs.existsSync(cachedIndex) ||
+      (fs.existsSync(srcIndex) &&
+        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+    if (needsCopy) {
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',
     readonly: false,
   });
-
-  // Mount gog (Google CLI) binary + wrapper + config if available
-  const gogBin = path.join(projectRoot, '.bin', 'gog-linux');
-  const gogWrapper = path.join(projectRoot, 'scripts', 'gog-wrapper.sh');
-  const gogConfigDir = path.join(
-    process.env.HOME || os.homedir(),
-    'Library', 'Application Support', 'gogcli',
-  );
-  if (fs.existsSync(gogBin) && fs.existsSync(gogConfigDir)) {
-    mounts.push(
-      { hostPath: gogBin, containerPath: '/usr/local/bin/gog-linux', readonly: true },
-      { hostPath: gogWrapper, containerPath: '/usr/local/bin/gog', readonly: true },
-      { hostPath: gogConfigDir, containerPath: '/workspace/.config/gogcli', readonly: true },
-    );
-  }
-
-  // Mount meeting-prep script if available
-  const meetingPrepScript = path.join(projectRoot, 'scripts', 'meeting-prep.sh');
-  if (fs.existsSync(meetingPrepScript)) {
-    mounts.push({
-      hostPath: meetingPrepScript,
-      containerPath: '/usr/local/bin/meeting-prep',
-      readonly: true,
-    });
-  }
-
-  // Confidential workstream data (PDFs, PPTXs, etc.) for groups with intakeAccess
-  // Mounted read-only so agents can read and send files but not modify them
-  if (group.intakeAccess) {
-    const confidentialDir = path.join(
-      process.env.HOME || os.homedir(),
-      "switchboard",
-      "confidential",
-    );
-    if (fs.existsSync(confidentialDir)) {
-      mounts.push({
-        hostPath: confidentialDir,
-        containerPath: "/workspace/confidential",
-        readonly: true,
-      });
-    }
-
-    // Mount the QMD confidential index (SQLite DB) so the in-container
-    // QMD MCP server can search documents without needing supergateway.
-    // WAL is checkpointed before each mount; the copy lives in a staging dir.
-    const qmdSrcDb = path.join(
-      process.env.HOME || os.homedir(),
-      ".cache", "qmd", "confidential.sqlite",
-    );
-    const qmdStaging = path.join(
-      process.env.HOME || os.homedir(),
-      ".cache", "qmd", "container-staging",
-    );
-    if (fs.existsSync(qmdSrcDb)) {
-      fs.mkdirSync(qmdStaging, { recursive: true });
-      const qmdDstDb = path.join(qmdStaging, "confidential.sqlite");
-      // Checkpoint WAL and copy to staging (atomic for readers)
-      try {
-        require("child_process").execSync(
-          `sqlite3 "${qmdSrcDb}" "PRAGMA wal_checkpoint(TRUNCATE);" && cp -f "${qmdSrcDb}" "${qmdDstDb}"`,
-        );
-      } catch {
-        // If checkpoint fails, copy whatever we have
-        try { fs.copyFileSync(qmdSrcDb, qmdDstDb); } catch {}
-      }
-      if (fs.existsSync(qmdDstDb)) {
-        mounts.push({
-          hostPath: qmdStaging,
-          containerPath: "/home/node/.cache/qmd",
-          readonly: false, // SQLite needs write for WAL even in read mode
-        });
-      }
-    }
-  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -302,40 +240,33 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function buildContainerArgs(
+async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-): string[] {
+  agentIdentifier?: string,
+): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  // OneCLI gateway handles credential injection — containers never see real secrets.
+  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
+  const onecliApplied = await onecli.applyContainerConfig(args, {
+    addHostMapping: false, // Nanoclaw already handles host gateway
+    agent: agentIdentifier,
+  });
+  if (onecliApplied) {
+    logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    logger.warn(
+      { containerName },
+      'OneCLI gateway not reachable — container will have no credentials',
+    );
   }
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
-
-  // Meeting-prep: container calls the credential proxy, which injects the real
-  // Bearer token. Container never sees MEETING_PREP_TOKEN directly.
-  // MEETING_PREP_URL in .env is the real sprite URL (read by credential-proxy.ts).
-  // Container gets the proxy base URL instead.
-  args.push('-e', 'MEETING_PREP_URL=http://host.docker.internal:3001');
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -347,16 +278,6 @@ function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
-
-  // --- Container security hardening ---
-  // Drop ALL Linux capabilities (agents need none)
-  args.push('--cap-drop=ALL');
-  // Prevent privilege escalation via setuid/setgid binaries
-  args.push('--security-opt=no-new-privileges:true');
-  // Limit processes to prevent fork bombs
-  args.push('--pids-limit=256');
-  // Memory limit (2GB should be plenty for Claude Code agent work)
-  args.push('--memory=2g');
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
@@ -377,19 +298,27 @@ export async function runContainerAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
+
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  // Main group uses the default OneCLI agent; others use their own agent.
+  const agentIdentifier = input.isMain
+    ? undefined
+    : group.folder.toLowerCase().replace(/_/g, '-');
+  const containerArgs = await buildContainerArgs(
+    mounts,
+    containerName,
+    agentIdentifier,
+  );
 
   logger.debug(
     {
       group: group.name,
       containerName,
-      calendarAccess: input.calendarAccess ?? false,
       mounts: mounts.map(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
@@ -519,15 +448,15 @@ export async function runContainerAgent(
         { group: group.name, containerName },
         'Container timeout, stopping gracefully',
       );
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-        if (err) {
-          logger.warn(
-            { group: group.name, containerName, err },
-            'Graceful stop failed, force killing',
-          );
-          container.kill('SIGKILL');
-        }
-      });
+      try {
+        stopContainer(containerName);
+      } catch (err) {
+        logger.warn(
+          { group: group.name, containerName, err },
+          'Graceful stop failed, force killing',
+        );
+        container.kill('SIGKILL');
+      }
     };
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
@@ -609,10 +538,20 @@ export async function runContainerAgent(
       const isError = code !== 0;
 
       if (isVerbose || isError) {
+        // On error, log input metadata only — not the full prompt.
+        // Full input is only included at verbose level to avoid
+        // persisting user conversation content on every non-zero exit.
+        if (isVerbose) {
+          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
+        } else {
+          logLines.push(
+            `=== Input Summary ===`,
+            `Prompt length: ${input.prompt.length} chars`,
+            `Session ID: ${input.sessionId || 'new'}`,
+            ``,
+          );
+        }
         logLines.push(
-          `=== Input ===`,
-          JSON.stringify(input, null, 2),
-          ``,
           `=== Container Args ===`,
           containerArgs.join(' '),
           ``,
@@ -755,6 +694,7 @@ export function writeTasksSnapshot(
     id: string;
     groupFolder: string;
     prompt: string;
+    script?: string | null;
     schedule_type: string;
     schedule_value: string;
     status: string;
@@ -790,7 +730,7 @@ export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
-  registeredJids: Set<string>,
+  _registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });

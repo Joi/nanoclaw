@@ -39,15 +39,15 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
-  remindersAccess?: boolean; // If true, group gets Apple Reminders tools
-  bookmarksAccess?: boolean; // If true, group gets bookmark extraction tools
-  emailAccess?: boolean; // If true, group gets email send/contacts tools
+  logTriggeredOnly?: boolean; // If true, only store messages that contain the trigger (saves DB space for noisy groups)
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
-  calendarAccess?: boolean; // If true, group gets gog calendar tools
-  fileServingAccess?: boolean; // If true, group can serve files via Slack upload
-  intakeAccess?: boolean; // If true, group can write intake files to workstream dirs
-  channelMode?: 'listening' | 'available'; // listening = passive intake, available = respond-only
-  logTriggeredOnly?: boolean; // If true, only store messages containing the trigger pattern
+  calendarAccess?: boolean;
+  fileServingAccess?: boolean;
+  intakeAccess?: boolean;
+  channelMode?: 'listening' | 'available';
+  remindersAccess?: boolean;
+  bookmarksAccess?: boolean;
+  emailAccess?: boolean;
 }
 
 export interface NewMessage {
@@ -59,6 +59,10 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  thread_id?: string;
+  reply_to_message_id?: string;
+  reply_to_message_content?: string;
+  reply_to_sender_name?: string;
 }
 
 export interface ScheduledTask {
@@ -66,6 +70,7 @@ export interface ScheduledTask {
   group_folder: string;
   chat_jid: string;
   prompt: string;
+  script?: string | null;
   schedule_type: 'cron' | 'interval' | 'once';
   schedule_value: string;
   context_mode: 'group' | 'isolated';
@@ -91,7 +96,6 @@ export interface Channel {
   name: string;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
-  sendFile?(jid: string, filePath: string, filename: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

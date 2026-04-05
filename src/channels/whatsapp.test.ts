@@ -70,10 +70,16 @@ function createFakeSocket() {
 
 let fakeSocket: ReturnType<typeof createFakeSocket>;
 
-// Mock Baileys
+// Mock group-folder
+vi.mock('../group-folder.js', () => ({
+  resolveGroupIpcPath: vi.fn(() => '/tmp/nanoclaw-test-ipc'),
+}));
+
+// Mock Baileys (v6: named exports, no default export)
 vi.mock('@whiskeysockets/baileys', () => {
   return {
-    default: vi.fn(() => fakeSocket),
+    makeWASocket: vi.fn(() => fakeSocket),
+    downloadMediaMessage: vi.fn().mockResolvedValue(undefined),
     Browsers: { macOS: vi.fn(() => ['macOS', 'Chrome', '']) },
     DisconnectReason: {
       loggedOut: 401,
@@ -221,28 +227,25 @@ describe('WhatsAppChannel', () => {
   // --- QR code and auth ---
 
   describe('authentication', () => {
-    it('exits process when QR code is emitted (no auth state)', async () => {
-      vi.useFakeTimers();
-      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
+    it('gracefully disables WhatsApp when QR code is emitted (no auth state)', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
-      // Start connect but don't await (it won't resolve - process exits)
-      channel.connect().catch(() => {});
+      // Start connect
+      const p = channel.connect();
 
-      // Flush microtasks so connectInternal registers handlers
-      await vi.advanceTimersByTimeAsync(0);
+      // Flush microtasks so connectInternal completes its await and registers handlers
+      await new Promise((r) => setTimeout(r, 0));
 
-      // Emit QR code event
+      // Emit QR code event — v6 unblocks startup instead of exiting
       fakeSocket._ev.emit('connection.update', { qr: 'some-qr-data' });
 
-      // Advance timer past the 1000ms setTimeout before exit
-      await vi.advanceTimersByTimeAsync(1500);
+      // connect() should resolve (unblocked by onFirstOpen)
+      await p;
 
-      expect(mockExit).toHaveBeenCalledWith(1);
-      mockExit.mockRestore();
-      vi.useRealTimers();
+      // Channel should be disconnected (gracefully disabled)
+      expect(channel.isConnected()).toBe(false);
+      expect(fakeSocket.end).toHaveBeenCalled();
     });
   });
 

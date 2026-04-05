@@ -76,13 +76,12 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL,
+      folder TEXT NOT NULL UNIQUE,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
-    CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -90,6 +89,13 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add script column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
   } catch {
     /* column already exists */
   }
@@ -135,84 +141,27 @@ function createSchema(database: Database.Database): void {
       `UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`,
     );
     database.exec(
-      `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'signal', is_group = 1 WHERE jid LIKE 'sig:group:%'`,
-    );
-    database.exec(
-      `UPDATE chats SET channel = 'signal', is_group = 0 WHERE jid LIKE 'sig:+%'`,
+      `UPDATE chats SET channel = 'telegram', is_group = 0 WHERE jid LIKE 'tg:%'`,
     );
   } catch {
     /* columns already exist */
   }
 
-  // Drop can_see_all_tasks column if it exists (no longer used)
-  try {
-    const hasCol = database
-      .prepare(`SELECT COUNT(*) as cnt FROM pragma_table_info('registered_groups') WHERE name='can_see_all_tasks'`)
-      .get() as { cnt: number };
-    if (hasCol.cnt > 0) {
-      logger.info('Dropping unused can_see_all_tasks column from registered_groups');
-      database.exec(`ALTER TABLE registered_groups DROP COLUMN can_see_all_tasks`);
-    }
-  } catch {
-    /* column doesn't exist or SQLite too old to DROP COLUMN — harmless either way */
-  }
-
-  // Add reminders_access column if it doesn't exist
+  // Add reply context columns if they don't exist (migration for existing DBs)
   try {
     database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN reminders_access INTEGER DEFAULT 0`,
+      `ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`,
+    );
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN reply_to_message_content TEXT`,
+    );
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`,
     );
   } catch {
-    /* column already exists */
+    /* columns already exist */
   }
 
-  // Add bookmarks_access column if it doesn't exist
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN bookmarks_access INTEGER DEFAULT 0`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add email_access column if it doesn't exist
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN email_access INTEGER DEFAULT 0`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add calendar_access column if it doesn't exist
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN calendar_access INTEGER DEFAULT 0`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add file_serving_access column if it doesn't exist
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN file_serving_access INTEGER DEFAULT 0`,
-    );
-  } catch {
-    /* column already exists */
-  }
-
-  // Add intake_access column if it doesn't exist
-  try {
-    database.exec(
-      `ALTER TABLE registered_groups ADD COLUMN intake_access INTEGER DEFAULT 0`,
-    );
-  } catch {
-    /* column already exists */
-  }
   // Add log_triggered_only column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -221,46 +170,6 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
-
-  // Remove UNIQUE constraint on folder (SQLite can't ALTER CONSTRAINT, so recreate)
-  migrateRemoveFolderUnique(database);
-}
-
-function migrateRemoveFolderUnique(database: Database.Database): void {
-  // Check if the UNIQUE constraint still exists on folder
-  const tableInfo = database
-    .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'`)
-    .get() as { sql: string } | undefined;
-  if (!tableInfo || !tableInfo.sql.includes('UNIQUE')) return;
-
-  logger.info('Migrating registered_groups: removing UNIQUE constraint on folder');
-  database.exec(`
-    CREATE TABLE registered_groups_new (
-      jid TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      folder TEXT NOT NULL,
-      trigger_pattern TEXT NOT NULL,
-      added_at TEXT NOT NULL,
-      container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1,
-      reminders_access INTEGER DEFAULT 0,
-      bookmarks_access INTEGER DEFAULT 0,
-      email_access INTEGER DEFAULT 0,
-      calendar_access INTEGER DEFAULT 0,
-      is_main INTEGER DEFAULT 0
-    );
-    INSERT INTO registered_groups_new SELECT
-      jid, name, folder, trigger_pattern, added_at, container_config,
-      requires_trigger, reminders_access, bookmarks_access,
-      COALESCE(email_access, 0),
-      COALESCE(calendar_access, 0),
-      COALESCE(is_main, 0)
-    FROM registered_groups;
-    DROP TABLE registered_groups;
-    ALTER TABLE registered_groups_new RENAME TO registered_groups;
-    CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
-  `);
-  logger.info('Migration complete: folder UNIQUE constraint removed');
 }
 
 export function initDatabase(): void {
@@ -278,6 +187,11 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+}
+
+/** @internal - for tests only. */
+export function _closeDatabase(): void {
+  db.close();
 }
 
 /**
@@ -384,7 +298,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, reply_to_message_id, reply_to_message_content, reply_to_sender_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -394,6 +308,9 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.reply_to_message_id ?? null,
+    msg.reply_to_message_content ?? null,
+    msg.reply_to_sender_name ?? null,
   );
 }
 
@@ -438,7 +355,8 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+             reply_to_message_id, reply_to_message_content, reply_to_sender_name
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -471,7 +389,8 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me,
+             reply_to_message_id, reply_to_message_content, reply_to_sender_name
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -485,19 +404,33 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+export function getLastBotMessageTimestamp(
+  chatJid: string,
+  botPrefix: string,
+): string | undefined {
+  const row = db
+    .prepare(
+      `SELECT MAX(timestamp) as ts FROM messages
+       WHERE chat_jid = ? AND (is_bot_message = 1 OR content LIKE ?)`,
+    )
+    .get(chatJid, `${botPrefix}:%`) as { ts: string | null } | undefined;
+  return row?.ts ?? undefined;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
     task.group_folder,
     task.chat_jid,
     task.prompt,
+    task.script || null,
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
@@ -532,7 +465,12 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status'
+      | 'prompt'
+      | 'script'
+      | 'schedule_type'
+      | 'schedule_value'
+      | 'next_run'
+      | 'status'
     >
   >,
 ): void {
@@ -542,6 +480,10 @@ export function updateTask(
   if (updates.prompt !== undefined) {
     fields.push('prompt = ?');
     values.push(updates.prompt);
+  }
+  if (updates.script !== undefined) {
+    fields.push('script = ?');
+    values.push(updates.script || null);
   }
   if (updates.schedule_type !== undefined) {
     fields.push('schedule_type = ?');
@@ -679,14 +621,8 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
-        reminders_access: number | null;
-        bookmarks_access: number | null;
-        email_access: number | null;
-        calendar_access: number | null;
-        is_main: number | null;
-        file_serving_access: number | null;
-        intake_access: number | null;
         log_triggered_only: number | null;
+        is_main: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -706,15 +642,10 @@ export function getRegisteredGroup(
     containerConfig: row.container_config
       ? JSON.parse(row.container_config)
       : undefined,
-    requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    remindersAccess: row.reminders_access === 1,
-    bookmarksAccess: row.bookmarks_access === 1,
-    emailAccess: row.email_access === 1,
-    calendarAccess: row.calendar_access === 1,
-    fileServingAccess: row.file_serving_access === 1,
-    intakeAccess: row.intake_access === 1,
+    requiresTrigger:
+      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    logTriggeredOnly: row.log_triggered_only === 1 ? true : undefined,
     isMain: row.is_main === 1 ? true : undefined,
-    logTriggeredOnly: row.log_triggered_only === 1,
   };
 }
 
@@ -723,8 +654,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access, email_access, calendar_access, is_main, file_serving_access, intake_access, log_triggered_only)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, log_triggered_only, is_main)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -733,14 +664,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
-    group.remindersAccess ? 1 : 0,
-    group.bookmarksAccess ? 1 : 0,
-    group.emailAccess ? 1 : 0,
-    group.calendarAccess ? 1 : 0,
-    group.isMain ? 1 : 0,
-    group.fileServingAccess ? 1 : 0,
-    group.intakeAccess ? 1 : 0,
     group.logTriggeredOnly ? 1 : 0,
+    group.isMain ? 1 : 0,
   );
 }
 
@@ -753,14 +678,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
-    reminders_access: number | null;
-    bookmarks_access: number | null;
-    email_access: number | null;
-    calendar_access: number | null;
-    is_main: number | null;
-    file_serving_access: number | null;
-    intake_access: number | null;
     log_triggered_only: number | null;
+    is_main: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -779,57 +698,13 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       containerConfig: row.container_config
         ? JSON.parse(row.container_config)
         : undefined,
-      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      remindersAccess: row.reminders_access === 1,
-      bookmarksAccess: row.bookmarks_access === 1,
-      emailAccess: row.email_access === 1,
-      calendarAccess: row.calendar_access === 1,
-      fileServingAccess: row.file_serving_access === 1,
-      intakeAccess: row.intake_access === 1,
+      requiresTrigger:
+        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      logTriggeredOnly: row.log_triggered_only === 1 ? true : undefined,
       isMain: row.is_main === 1 ? true : undefined,
-      logTriggeredOnly: row.log_triggered_only === 1,
     };
   }
   return result;
-}
-
-export function getRegisteredGroupsByFolder(
-  folder: string,
-): Array<{ jid: string } & RegisteredGroup> {
-  const rows = db
-    .prepare('SELECT * FROM registered_groups WHERE folder = ?')
-    .all(folder) as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-    can_see_all_tasks: number | null;
-    reminders_access: number | null;
-    bookmarks_access: number | null;
-    email_access: number | null;
-    calendar_access: number | null;
-  }>;
-  return rows
-    .filter((row) => isValidGroupFolder(row.folder))
-    .map((row) => ({
-      jid: row.jid,
-      name: row.name,
-      folder: row.folder,
-      trigger: row.trigger_pattern,
-      added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
-      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-      canSeeAllTasks: row.can_see_all_tasks === 1,
-      remindersAccess: row.reminders_access === 1,
-      bookmarksAccess: row.bookmarks_access === 1,
-      emailAccess: row.email_access === 1,
-      calendarAccess: row.calendar_access === 1,
-    }));
 }
 
 // --- JSON migration ---
