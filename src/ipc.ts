@@ -3,7 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -504,9 +504,23 @@ export async function processTaskIpc(
         const isAdmin = canonicalTier === 'owner' || canonicalTier === 'admin';
         const groupName = name || `GIDC ${canonicalTier} (${slackUserId})`;
 
+        const templateFolder = `gidc-template-${canonicalTier}`;
+        const userFolder = `gidc-${slackUserId}`;
+        const userFolderPath = path.join(GROUPS_DIR, userFolder);
+        const templateFolderPath = path.join(GROUPS_DIR, templateFolder);
+
+        // Create per-user folder from template if it doesn't already exist
+        if (!fs.existsSync(userFolderPath) && fs.existsSync(templateFolderPath)) {
+          fs.cpSync(templateFolderPath, userFolderPath, { recursive: true });
+          logger.info(
+            { userFolder, templateFolder },
+            'user_manage: created per-user folder from template',
+          );
+        }
+
         deps.registerGroup(userJid, {
           name: groupName,
-          folder: `gidc-template-${canonicalTier}`,
+          folder: userFolder,
           trigger: '@gibot',
           added_at: new Date().toISOString(),
           requiresTrigger: false,

@@ -144,7 +144,7 @@ describe('user_manage add action', () => {
     expect(registerGroupCalls).toHaveLength(1);
     const [jid, group] = registerGroupCalls[0];
     expect(jid).toBe('slack:testns:U123');
-    expect(group.folder).toBe('gidc-template-staff');
+    expect(group.folder).toBe('gidc-U123');
     // spec: name defaults to `GIDC ${tier} (${slackUserId})`
     expect(group.name).toBe('GIDC staff (U123)');
     // spec: trigger is '@gibot'
@@ -198,7 +198,7 @@ describe('user_manage add action', () => {
     expect(registerGroupCalls).toHaveLength(1);
     const [jid, group] = registerGroupCalls[0];
     expect(jid).toBe('slack:testns:U456');
-    expect(group.folder).toBe('gidc-template-owner');
+    expect(group.folder).toBe('gidc-U456');
     expect(group.name).toBe('GIDC owner (U456)');
     expect(group.trigger).toBe('@gibot');
     expect(group.requiresTrigger).toBe(false);
@@ -228,7 +228,7 @@ describe('user_manage add action', () => {
     expect(registerGroupCalls).toHaveLength(1);
     const [jid, group] = registerGroupCalls[0];
     expect(jid).toBe('slack:testns:U789');
-    expect(group.folder).toBe('gidc-template-admin');
+    expect(group.folder).toBe('gidc-U789');
     expect(group.name).toBe('GIDC admin (U789)');
     expect(group.trigger).toBe('@gibot');
     expect(group.requiresTrigger).toBe(false);
