@@ -72,6 +72,7 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { loadChannelConfigs, getQmdPorts } from './channel-config.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
@@ -82,6 +83,13 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
+
+// Channel configs for floor-based access control (loaded in main())
+const CHANNEL_CONFIGS_DIR = path.join(
+  process.env.HOME || '/Users/jibot',
+  'switchboard', 'ops', 'jibot', 'channels',
+);
+let channelConfigs = loadChannelConfigs(CHANNEL_CONFIGS_DIR);
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -431,6 +439,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        qmdPorts: getQmdPorts(chatJid, channelConfigs),
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -612,6 +621,11 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Reload channel configs periodically (every 5 minutes) in case configs change via Syncthing
+  setInterval(() => {
+    channelConfigs = loadChannelConfigs(CHANNEL_CONFIGS_DIR);
+  }, 300_000);
 
   // Ensure OneCLI agents exist for all registered groups.
   // Recovers from missed creates (e.g. OneCLI was down at registration time).

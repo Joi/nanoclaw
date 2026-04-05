@@ -46,6 +46,7 @@ export interface ContainerInput {
   remindersAccess?: boolean;
   bookmarksAccess?: boolean;
   emailAccess?: boolean;
+  qmdPorts?: Record<string, number>;
 }
 
 export interface ContainerOutput {
@@ -64,6 +65,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  qmdPorts?: Record<string, number>,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -151,7 +153,17 @@ function buildVolumeMounts(
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
       },
     };
-    if (group.intakeAccess || group.fileServingAccess) {
+    if (qmdPorts && Object.keys(qmdPorts).length > 0) {
+      const mcpServers: Record<string, { command: string; args: string[] }> = {};
+      for (const [indexName, port] of Object.entries(qmdPorts)) {
+        mcpServers[`qmd-${indexName}`] = {
+          command: '/bin/sh',
+          args: ['-c', `exec socat STDIO TCP:host.docker.internal:${port}`],
+        };
+      }
+      settingsObj.mcpServers = mcpServers;
+    } else if (group.intakeAccess || group.fileServingAccess) {
+      // Fallback for non-channel containers (DMs, Signal, etc.)
       settingsObj.mcpServers = {
         qmd: {
           command: '/bin/sh',
@@ -302,7 +314,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.qmdPorts);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   // Main group uses the default OneCLI agent; others use their own agent.

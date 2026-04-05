@@ -297,6 +297,53 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     expect(content.mcpServers).toBeUndefined();
   });
 
+  it("mounts multiple QMD servers when qmdPorts provided", () => {
+    const inputWithPorts = {
+      ...testInput,
+      qmdPorts: { public: 7333, crm: 7334, 'domain-gidc': 7335 },
+    };
+
+    runContainerAgent(testGroup, inputWithPorts, () => {});
+
+    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === "string" && filePath.includes("settings.json"),
+    );
+    expect(settingsCall).toBeDefined();
+    const content = JSON.parse(settingsCall![1] as string);
+    expect(content.mcpServers).toBeDefined();
+    expect(content.mcpServers['qmd-public']).toEqual({
+      command: "/bin/sh",
+      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7333"],
+    });
+    expect(content.mcpServers['qmd-crm']).toEqual({
+      command: "/bin/sh",
+      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7334"],
+    });
+    expect(content.mcpServers['qmd-domain-gidc']).toEqual({
+      command: "/bin/sh",
+      args: ["-c", "exec socat STDIO TCP:host.docker.internal:7335"],
+    });
+  });
+
+  it("mounts only public QMD for guest floor (single port)", () => {
+    const inputWithPorts = {
+      ...testInput,
+      qmdPorts: { public: 7333 },
+    };
+
+    runContainerAgent(testGroup, inputWithPorts, () => {});
+
+    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+      ([filePath]) =>
+        typeof filePath === "string" && filePath.includes("settings.json"),
+    );
+    expect(settingsCall).toBeDefined();
+    const content = JSON.parse(settingsCall![1] as string);
+    expect(content.mcpServers).toBeDefined();
+    expect(Object.keys(content.mcpServers)).toEqual(['qmd-public']);
+  });
+
   it("does not rewrite settings.json if it already exists", () => {
     vi.mocked(fs.existsSync).mockImplementation(
       (p) => typeof p === "string" && p.includes("settings.json"),
