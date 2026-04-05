@@ -1,5 +1,6 @@
 import { App, LogLevel } from '@slack/bolt';
-import { PDFParse } from 'pdf-parse';
+import pkg from 'pdf-parse';
+const { PDFParse } = pkg;
 import fs from 'fs';
 import path from 'path';
 import { markdownToSlack } from '../format.js';
