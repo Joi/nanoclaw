@@ -14,6 +14,17 @@ import {
   MAX_MESSAGES_PER_PROMPT,
   ONECLI_URL,
   POLL_INTERVAL,
+  SIGNAL_ACCOUNT,
+  SIGNAL_CLI_URL,
+  SIGNAL_DEFAULT_TIER,
+  SIGNAL_ONLY,
+  SLACK_APP_TOKEN,
+  SLACK_BOT_TOKEN,
+  SLACK_SIGNING_SECRET,
+  SLACK_2_APP_TOKEN,
+  SLACK_2_BOT_TOKEN,
+  SLACK_2_NAMESPACE,
+  SLACK_2_SIGNING_SECRET,
   SLACK_3_APP_TOKEN,
   SLACK_3_BOT_TOKEN,
   SLACK_3_NAMESPACE,
@@ -22,6 +33,8 @@ import {
   SLACK_4_BOT_TOKEN,
   SLACK_4_NAMESPACE,
   SLACK_4_SIGNING_SECRET,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_ONLY,
   TIMEZONE,
 } from './config.js';
 import './channels/index.js';
@@ -29,7 +42,10 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
+import { WhatsAppChannel } from './channels/whatsapp.js';
+import { SignalChannel } from './channels/signal.js';
 import { SlackChannel } from './channels/slack.js';
+import { TelegramChannel } from './channels/telegram.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -97,6 +113,7 @@ let channelConfigs = loadChannelConfigs(CHANNEL_CONFIGS_DIR);
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
+let whatsapp: WhatsAppChannel | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -620,6 +637,165 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+// --- Auto-register gate: deny-all catch-all for unknown contacts ---
+interface AutoRegisterGate {
+  enabled: boolean;
+  mode: 'allowlist' | 'denylist';
+  allowed: string[];
+  notifyOwnerJid?: string;
+  rejectionMessage: string;
+}
+
+const AUTO_REGISTER_GATE_PATH = path.join(
+  process.env.HOME || '/Users/jibot',
+  '.config',
+  'nanoclaw',
+  'auto-register-gate.json',
+);
+
+function loadAutoRegisterGate(): AutoRegisterGate | null {
+  try {
+    const raw = fs.readFileSync(AUTO_REGISTER_GATE_PATH, 'utf-8');
+    const gate = JSON.parse(raw) as AutoRegisterGate;
+    if (!gate.enabled) return null;
+    return gate;
+  } catch {
+    return null; // No gate file = no restriction (backward compatible)
+  }
+}
+
+function isAutoRegisterAllowed(chatJid: string): boolean {
+  const gate = loadAutoRegisterGate();
+  if (!gate) return true; // No gate = allow all (backward compatible)
+
+  if (gate.mode === 'allowlist') {
+    return gate.allowed.some((pattern) => chatJid.includes(pattern));
+  }
+  // denylist mode
+  return !gate.allowed.some((pattern) => chatJid.includes(pattern));
+}
+
+function getGateRejectionMessage(): string {
+  const gate = loadAutoRegisterGate();
+  return gate?.rejectionMessage || 'I am not configured to chat with unknown contacts.';
+}
+
+function getGateNotifyOwnerJid(): string | undefined {
+  const gate = loadAutoRegisterGate();
+  return gate?.notifyOwnerJid;
+}
+
+/**
+ * Auto-register a new Signal DM contact using the default tier template.
+ * Creates a per-contact folder (sig-{phone}) with CLAUDE.md copied from the template.
+ */
+function autoRegisterSignalContact(chatJid: string, senderName: string): boolean {
+  if (!SIGNAL_DEFAULT_TIER) return false;
+
+  // Deny-all gate: check if this contact is approved for auto-registration
+  if (!isAutoRegisterAllowed(chatJid)) {
+    logger.warn(
+      { chatJid, senderName },
+      'Auto-registration DENIED by gate (not on allowlist)',
+    );
+    return false;
+  }
+
+  // Extract phone from JID (sig:+819048411965 -> 819048411965)
+  const phone = chatJid.replace(/^sig:\+?/, '');
+  const folder = `sig-${phone}`;
+  const displayName = senderName || phone;
+
+  // Check template folder exists
+  const templateDir = path.join(GROUPS_DIR, SIGNAL_DEFAULT_TIER);
+  const templateClaudeMd = path.join(templateDir, 'CLAUDE.md');
+  if (!fs.existsSync(templateClaudeMd)) {
+    logger.warn(
+      { template: SIGNAL_DEFAULT_TIER, chatJid },
+      'Signal default tier template CLAUDE.md not found, skipping auto-registration',
+    );
+    return false;
+  }
+
+  const group: RegisteredGroup = {
+    name: displayName,
+    folder,
+    trigger: `@${ASSISTANT_NAME}`,
+    added_at: new Date().toISOString(),
+    requiresTrigger: true,
+  };
+
+  registerGroup(chatJid, group);
+
+  // Copy CLAUDE.md from template
+  const groupDir = path.join(GROUPS_DIR, folder);
+  const destClaudeMd = path.join(groupDir, 'CLAUDE.md');
+  if (!fs.existsSync(destClaudeMd)) {
+    fs.copyFileSync(templateClaudeMd, destClaudeMd);
+  }
+
+  logger.info(
+    { chatJid, folder, template: SIGNAL_DEFAULT_TIER, senderName: displayName },
+    'Auto-registered new Signal contact',
+  );
+  return true;
+}
+
+/**
+ * Auto-register a new Slack DM or channel.
+ * DMs use the Signal default tier template; channels get requiresTrigger: true.
+ */
+function autoRegisterSlackContact(chatJid: string, nameOrId: string, isGroup: boolean): boolean {
+  if (!SIGNAL_DEFAULT_TIER) return false;
+
+  // Deny-all gate: check if this contact is approved for auto-registration
+  if (!isAutoRegisterAllowed(chatJid)) {
+    logger.warn(
+      { chatJid, nameOrId },
+      'Auto-registration DENIED by gate (not on allowlist)',
+    );
+    return false;
+  }
+
+  const idPart = chatJid.replace(/^slack:(?:channel:)?/, '');
+  const folder = `slack-${idPart}`;
+  const displayName = nameOrId || idPart;
+
+  // Check template folder exists
+  const templateDir = path.join(GROUPS_DIR, SIGNAL_DEFAULT_TIER);
+  const templateClaudeMd = path.join(templateDir, 'CLAUDE.md');
+  if (!fs.existsSync(templateClaudeMd)) {
+    logger.warn(
+      { template: SIGNAL_DEFAULT_TIER, chatJid },
+      'Default tier template CLAUDE.md not found, skipping Slack auto-registration',
+    );
+    return false;
+  }
+
+  const group: RegisteredGroup = {
+    name: displayName,
+    folder,
+    trigger: `@${ASSISTANT_NAME}`,
+    added_at: new Date().toISOString(),
+    requiresTrigger: isGroup,
+  };
+
+  registerGroup(chatJid, group);
+
+  // Copy CLAUDE.md from template
+  const groupDir = path.join(GROUPS_DIR, folder);
+  const destClaudeMd = path.join(groupDir, 'CLAUDE.md');
+  if (!fs.existsSync(destClaudeMd)) {
+    fs.copyFileSync(templateClaudeMd, destClaudeMd);
+  }
+
+  logger.info(
+    { chatJid, folder, template: SIGNAL_DEFAULT_TIER, name: displayName, isGroup },
+    'Auto-registered new Slack contact',
+  );
+  return true;
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -813,25 +989,82 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect all registered channels.
-  // Each channel self-registers via the barrel import above.
-  // Factories return null when credentials are missing, so unconfigured channels are skipped.
-  for (const channelName of getRegisteredChannelNames()) {
-    const factory = getChannelFactory(channelName)!;
-    const channel = factory(channelOpts);
-    if (!channel) {
-      logger.warn(
-        { channel: channelName },
-        'Channel installed but credentials missing — skipping. Check .env or re-run the channel skill.',
-      );
-      continue;
+  // Signal channel (if configured)
+  if (SIGNAL_ACCOUNT) {
+    const signal = new SignalChannel({
+      ...channelOpts,
+      signalCliUrl: SIGNAL_CLI_URL,
+      signalAccount: SIGNAL_ACCOUNT,
+      botUuid: process.env.SIGNAL_BOT_UUID || '2e28a309-9ead-4cf4-9186-a5d133d50e70',
+      onNewContact: SIGNAL_DEFAULT_TIER ? (chatJid: string, senderName: string) => {
+        const registered = autoRegisterSignalContact(chatJid, senderName);
+        if (!registered && !isAutoRegisterAllowed(chatJid)) {
+          // Deny-all catch-all: send rejection + notify owner
+          signal.sendMessage(chatJid, getGateRejectionMessage()).catch(() => {});
+          const ownerJid = getGateNotifyOwnerJid();
+          if (ownerJid) {
+            signal.sendMessage(
+              ownerJid,
+              `[gate] Unknown contact tried to message: ${senderName} (${chatJid})`,
+            ).catch(() => {});
+          }
+        }
+        return registered;
+      } : undefined,
+    });
+    channels.push(signal);
+    try {
+      await signal.connect();
+      logger.info('Signal channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Signal channel');
     }
-    channels.push(channel);
-    await channel.connect();
+  }
+
+  // First Slack workspace (if configured)
+  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+    const slack = new SlackChannel({
+      ...channelOpts,
+      slackBotToken: SLACK_BOT_TOKEN,
+      slackAppToken: SLACK_APP_TOKEN,
+      slackSigningSecret: SLACK_SIGNING_SECRET,
+      onNewContact: SIGNAL_DEFAULT_TIER ? (chatJid: string, nameOrId: string, isGroup: boolean) => {
+        const registered = autoRegisterSlackContact(chatJid, nameOrId, isGroup);
+        if (!registered && !isAutoRegisterAllowed(chatJid)) {
+          logger.warn(
+            { chatJid, nameOrId },
+            'Slack contact rejected by auto-register gate',
+          );
+        }
+        return registered;
+      } : undefined,
+    });
+    channels.push(slack);
+    try {
+      await slack.connect();
+      logger.info('Slack channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Slack channel');
+    }
   }
 
   // Second Slack workspace (if configured)
-  // (handled by channel registry above)
+  if (SLACK_2_BOT_TOKEN && SLACK_2_APP_TOKEN && SLACK_2_NAMESPACE) {
+    const slack2 = new SlackChannel({
+      ...channelOpts,
+      slackBotToken: SLACK_2_BOT_TOKEN,
+      slackAppToken: SLACK_2_APP_TOKEN,
+      slackSigningSecret: SLACK_2_SIGNING_SECRET,
+      namespace: SLACK_2_NAMESPACE,
+    });
+    channels.push(slack2);
+    try {
+      await slack2.connect();
+      logger.info({ namespace: SLACK_2_NAMESPACE }, 'Slack 2 channel connected');
+    } catch (err) {
+      logger.error({ err, namespace: SLACK_2_NAMESPACE }, 'Failed to connect Slack 2 channel');
+    }
+  }
 
   // Third Slack workspace — GIDC (if configured)
   // No onNewContact — contacts linked manually
@@ -870,8 +1103,29 @@ async function main(): Promise<void> {
     }
   }
 
-  // Telegram channel
-  // (handled by channel registry above)
+  // Telegram channel (if configured)
+  if (TELEGRAM_BOT_TOKEN) {
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    channels.push(telegram);
+    try {
+      await telegram.connect();
+      logger.info('Telegram channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Telegram channel');
+    }
+  }
+
+  // WhatsApp channel (if not in Signal-only or Telegram-only mode)
+  if (!SIGNAL_ONLY && !TELEGRAM_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    try {
+      await whatsapp.connect();
+      logger.info('WhatsApp channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect WhatsApp channel');
+    }
+  }
 
   if (channels.length === 0) {
     logger.fatal('No channels connected');

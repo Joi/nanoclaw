@@ -10,6 +10,17 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'ONECLI_URL',
   'TZ',
+  'SIGNAL_CLI_URL',
+  'SIGNAL_ACCOUNT',
+  'SIGNAL_ONLY',
+  'SIGNAL_DEFAULT_TIER',
+  'SLACK_BOT_TOKEN',
+  'SLACK_APP_TOKEN',
+  'SLACK_SIGNING_SECRET',
+  'SLACK_2_BOT_TOKEN',
+  'SLACK_2_APP_TOKEN',
+  'SLACK_2_SIGNING_SECRET',
+  'SLACK_2_NAMESPACE',
   'SLACK_3_BOT_TOKEN',
   'SLACK_3_APP_TOKEN',
   'SLACK_3_SIGNING_SECRET',
@@ -18,6 +29,8 @@ const envConfig = readEnvFile([
   'SLACK_4_APP_TOKEN',
   'SLACK_4_SIGNING_SECRET',
   'SLACK_4_NAMESPACE',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
   'CONFIDENTIAL_ROOT',
 ]);
 
@@ -26,6 +39,28 @@ export const ASSISTANT_NAME =
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+
+// Signal configuration
+export const SIGNAL_CLI_URL = process.env.SIGNAL_CLI_URL || envConfig.SIGNAL_CLI_URL || 'http://127.0.0.1:8080';
+export const SIGNAL_ACCOUNT = process.env.SIGNAL_ACCOUNT || envConfig.SIGNAL_ACCOUNT || '';
+export const SIGNAL_ONLY = (process.env.SIGNAL_ONLY || envConfig.SIGNAL_ONLY) === 'true';
+export const SIGNAL_DEFAULT_TIER = process.env.SIGNAL_DEFAULT_TIER || envConfig.SIGNAL_DEFAULT_TIER || '';
+
+// Slack configuration (first workspace)
+export const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
+export const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET || envConfig.SLACK_SIGNING_SECRET || '';
+
+// Second Slack workspace
+export const SLACK_2_BOT_TOKEN = process.env.SLACK_2_BOT_TOKEN || envConfig.SLACK_2_BOT_TOKEN || '';
+export const SLACK_2_APP_TOKEN = process.env.SLACK_2_APP_TOKEN || envConfig.SLACK_2_APP_TOKEN || '';
+export const SLACK_2_SIGNING_SECRET = process.env.SLACK_2_SIGNING_SECRET || envConfig.SLACK_2_SIGNING_SECRET || '';
+export const SLACK_2_NAMESPACE = process.env.SLACK_2_NAMESPACE || envConfig.SLACK_2_NAMESPACE || '';
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY = (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
