@@ -491,7 +491,7 @@ export async function processTaskIpc(
       const userJid = `slack:${namespace}:${slackUserId}`;
 
       if (action === 'add') {
-        const validTiers = ['staff', 'owner', 'assistant'];
+        const validTiers = ['staff', 'owner', 'admin', 'assistant'];
         if (!tier || !validTiers.includes(tier)) {
           logger.warn(
             { sourceGroup, tier },
@@ -500,12 +500,13 @@ export async function processTaskIpc(
           break;
         }
 
-        const isAdmin = tier === 'owner' || tier === 'assistant';
-        const groupName = name || `GIDC ${tier} (${slackUserId})`;
+        const canonicalTier = tier === 'assistant' ? 'admin' : tier;
+        const isAdmin = canonicalTier === 'owner' || canonicalTier === 'admin';
+        const groupName = name || `GIDC ${canonicalTier} (${slackUserId})`;
 
         deps.registerGroup(userJid, {
           name: groupName,
-          folder: `gidc-template-${tier}`,
+          folder: `gidc-template-${canonicalTier}`,
           trigger: '@gibot',
           added_at: new Date().toISOString(),
           requiresTrigger: false,

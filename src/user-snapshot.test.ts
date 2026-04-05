@@ -38,7 +38,7 @@ describe('buildUsersSnapshot', () => {
       },
       'slack:gidc:U002': {
         name: 'slack:gidc:U002',
-        folder: 'gidc-template-assistant',
+        folder: 'gidc-template-admin',
         trigger: '@Andy',
         added_at: '2026-01-02T00:00:00.000Z',
       },
@@ -79,7 +79,7 @@ describe('buildUsersSnapshot', () => {
 
     const assistant = snapshot.users.find((u) => u.slackUserId === 'U002');
     expect(assistant).toBeDefined();
-    expect(assistant?.tier).toBe('assistant');
+    expect(assistant?.tier).toBe('admin');
 
     const staff = snapshot.users.find((u) => u.slackUserId === 'U003');
     expect(staff).toBeDefined();
@@ -118,7 +118,7 @@ describe('writeUsersSnapshot', () => {
     const registeredGroups: Record<string, RegisteredGroup> = {
       'slack:gidc:U100': {
         name: 'slack:gidc:U100',
-        folder: 'gidc-template-assistant',
+        folder: 'gidc-template-admin',
         trigger: '@Andy',
         added_at: '2026-02-01T00:00:00.000Z',
         remindersAccess: true,
@@ -142,7 +142,7 @@ describe('writeUsersSnapshot', () => {
     expect(content.users).toHaveLength(1);
     expect(content.users[0].slackUserId).toBe('U100');
     expect(content.users[0].jid).toBe('slack:gidc:U100');
-    expect(content.users[0].tier).toBe('assistant');
+    expect(content.users[0].tier).toBe('admin');
     expect(content.users[0].remindersAccess).toBe(true);
     expect(content.users[0].calendarAccess).toBe(true);
     expect(content.users[0].addedAt).toBe('2026-02-01T00:00:00.000Z');

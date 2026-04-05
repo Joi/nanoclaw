@@ -228,8 +228,8 @@ describe('user_manage add action', () => {
     expect(registerGroupCalls).toHaveLength(1);
     const [jid, group] = registerGroupCalls[0];
     expect(jid).toBe('slack:testns:U789');
-    expect(group.folder).toBe('gidc-template-assistant');
-    expect(group.name).toBe('GIDC assistant (U789)');
+    expect(group.folder).toBe('gidc-template-admin');
+    expect(group.name).toBe('GIDC admin (U789)');
     expect(group.trigger).toBe('@gibot');
     expect(group.requiresTrigger).toBe(false);
     expect(group.remindersAccess).toBe(true);

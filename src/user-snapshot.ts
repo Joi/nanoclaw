@@ -29,11 +29,11 @@ export interface UsersSnapshot {
 
 /**
  * Infer user tier from the group folder name.
- * Returns 'owner', 'assistant', or 'staff' based on folder string.
+ * Returns 'owner', 'admin', or 'staff' based on folder string.
  */
 function inferTier(group: RegisteredGroup): string {
   if (group.folder.includes('owner')) return 'owner';
-  if (group.folder.includes('assistant')) return 'assistant';
+  if (group.folder.includes('admin')) return 'admin';
   return 'staff';
 }
 
