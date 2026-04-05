@@ -12,10 +12,11 @@ import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import readline from 'readline';
 
-import makeWASocket, {
+import {
   Browsers,
   DisconnectReason,
   makeCacheableSignalKeyStore,
+  makeWASocket,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
@@ -56,10 +57,10 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
+      keys: makeCacheableSignalKeyStore(state.keys, logger as any),
     },
     printQRInTerminal: false,
-    logger,
+    logger: logger as any,
     browser: Browsers.macOS('Chrome'),
   });
 

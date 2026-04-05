@@ -29,7 +29,7 @@ sleep 10
 
 # Reindex
 echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) REINDEXING: qmd update" >> "$LOGFILE"
-OUTPUT=$(/opt/homebrew/bin/qmd update 2>&1) || true
+OUTPUT=$(/opt/homebrew/bin/qmd --index confidential update 2>&1) || true
 
 # Log summary
 echo "$OUTPUT" | grep -iE "indexed|collection|files|updated|error" >> "$LOGFILE" 2>/dev/null || true

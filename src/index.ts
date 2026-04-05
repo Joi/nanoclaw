@@ -324,6 +324,13 @@ function ensureEmailGroup(): void {
     emailAccess: true,
     bookmarksAccess: true,
     remindersAccess: true,
+    containerConfig: {
+      additionalMounts: [{
+        hostPath: '~/jibrain/intake',
+        containerPath: 'jibrain-intake',
+        readonly: false,
+      }],
+    },
   };
   registerGroup(jid, group);
 
@@ -828,6 +835,25 @@ async function main(): Promise<void> {
           return;
         }
       }
+      // Skip storing non-trigger messages for groups with logTriggeredOnly
+      // Use a permissive check: store if message contains the trigger name anywhere
+      // or contains U+FFFC (Signal mention placeholder). This is a storage filter,
+      // not a response trigger, so it's OK to be broad.
+      if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
+        const grp = registeredGroups[chatJid];
+        if (grp.logTriggeredOnly) {
+          const text = msg.content.trim().toLowerCase();
+          const hasTriggerText = text.includes(ASSISTANT_NAME.toLowerCase());
+          const hasMentionChar = msg.content.includes('\ufffc');
+          if (!hasTriggerText && !hasMentionChar) {
+            logger.debug(
+              { chatJid, sender: msg.sender },
+              'logTriggeredOnly: skipping non-trigger message',
+            );
+            return;
+          }
+        }
+      }
       storeMessage(msg);
 
       // GIDC intake: write substantive messages to confidential workstream dirs
@@ -901,6 +927,7 @@ async function main(): Promise<void> {
       ...channelOpts,
       signalCliUrl: SIGNAL_CLI_URL,
       signalAccount: SIGNAL_ACCOUNT,
+      botUuid: process.env.SIGNAL_BOT_UUID || "2e28a309-9ead-4cf4-9186-a5d133d50e70",
       onNewContact: SIGNAL_DEFAULT_TIER ? (chatJid, senderName) => {
         const registered = autoRegisterSignalContact(chatJid, senderName);
         if (!registered && !isAutoRegisterAllowed(chatJid)) {

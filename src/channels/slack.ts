@@ -2,6 +2,7 @@ import { App, LogLevel } from '@slack/bolt';
 import { PDFParse } from 'pdf-parse';
 import fs from 'fs';
 import path from 'path';
+import { markdownToSlack } from '../format.js';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
 
@@ -105,10 +106,11 @@ export class SlackChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const channelId = await this.resolveChannelId(jid);
+    const formatted = markdownToSlack(text);
     try {
       await this.app.client.chat.postMessage({
         channel: channelId,
-        text,
+        text: formatted,
       });
       logger.info({ jid, length: text.length }, 'Slack message sent');
     } catch (err) {

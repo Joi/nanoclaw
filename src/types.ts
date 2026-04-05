@@ -47,6 +47,7 @@ export interface RegisteredGroup {
   fileServingAccess?: boolean; // If true, group can serve files via Slack upload
   intakeAccess?: boolean; // If true, group can write intake files to workstream dirs
   channelMode?: 'listening' | 'available'; // listening = passive intake, available = respond-only
+  logTriggeredOnly?: boolean; // If true, only store messages containing the trigger pattern
 }
 
 export interface NewMessage {

@@ -213,6 +213,14 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+  // Add log_triggered_only column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE registered_groups ADD COLUMN log_triggered_only INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
 
   // Remove UNIQUE constraint on folder (SQLite can't ALTER CONSTRAINT, so recreate)
   migrateRemoveFolderUnique(database);
@@ -678,6 +686,7 @@ export function getRegisteredGroup(
         is_main: number | null;
         file_serving_access: number | null;
         intake_access: number | null;
+        log_triggered_only: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -705,6 +714,7 @@ export function getRegisteredGroup(
     fileServingAccess: row.file_serving_access === 1,
     intakeAccess: row.intake_access === 1,
     isMain: row.is_main === 1 ? true : undefined,
+    logTriggeredOnly: row.log_triggered_only === 1,
   };
 }
 
@@ -713,8 +723,8 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access, email_access, calendar_access, is_main, file_serving_access, intake_access)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, reminders_access, bookmarks_access, email_access, calendar_access, is_main, file_serving_access, intake_access, log_triggered_only)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -730,6 +740,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.isMain ? 1 : 0,
     group.fileServingAccess ? 1 : 0,
     group.intakeAccess ? 1 : 0,
+    group.logTriggeredOnly ? 1 : 0,
   );
 }
 
@@ -749,6 +760,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     is_main: number | null;
     file_serving_access: number | null;
     intake_access: number | null;
+    log_triggered_only: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -775,6 +787,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       fileServingAccess: row.file_serving_access === 1,
       intakeAccess: row.intake_access === 1,
       isMain: row.is_main === 1 ? true : undefined,
+      logTriggeredOnly: row.log_triggered_only === 1,
     };
   }
   return result;

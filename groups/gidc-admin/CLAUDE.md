@@ -25,8 +25,23 @@ The GIDC knowledge base is indexed and searchable via QMD MCP tools. **Always se
 
 ### Available Collections
 
-- `confidential-sankosh` — Sankosh project documents (61 files)
-- `confidential-gidc` — GIDC project documents (37 files)
+- `confidential-sankosh` — Sankosh project documents
+- `confidential-gidc` — GIDC project documents
+- `confidential-gmc` — GMC (Gelephu Mindfulness City) project documents
+
+### Workstream Aliases
+
+When a user refers to a workstream by name, map to these QMD collections:
+
+| User says | Search these collections |
+|-----------|-------------------------|
+| "GMC" or "GMC workstream" | `confidential-gmc` (also check `confidential-gidc` and `confidential-sankosh` for older GMC docs) |
+| "GIDC" | `confidential-gidc` |
+| "Sankosh" | `confidential-sankosh` |
+| "Bhutan" | `confidential-bhutan` |
+| "all workstreams" / no filter | Omit `collections` parameter to search everything |
+
+> **Important**: GMC is the parent organization of GIDC. Some GMC documents may exist in the `confidential-gidc` or `confidential-sankosh` collections for historical reasons. When searching for GMC content, search `confidential-gmc` first, then broaden to other collections if not found.
 
 ### How to Search
 

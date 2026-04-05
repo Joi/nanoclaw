@@ -2,15 +2,19 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import makeWASocket, {
+import {
   Browsers,
   DisconnectReason,
+  WAMessage,
   WASocket,
+  downloadMediaMessage,
   makeCacheableSignalKeyStore,
+  makeWASocket,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
 import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
+import { resolveGroupIpcPath } from '../group-folder.js';
 import {
   getLastGroupSync,
   setLastGroupSync,
@@ -58,10 +62,10 @@ export class WhatsAppChannel implements Channel {
     this.sock = makeWASocket({
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: makeCacheableSignalKeyStore(state.keys, logger as any),
       },
       printQRInTerminal: false,
-      logger,
+      logger: logger as any,
       browser: Browsers.macOS('Chrome'),
     });
 
@@ -75,7 +79,12 @@ export class WhatsAppChannel implements Channel {
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
         );
-        setTimeout(() => process.exit(1), 1000);
+        // Gracefully disable WhatsApp instead of crashing the entire process
+        this.connected = false;
+        try { this.sock?.end?.(undefined); } catch {}
+        if (onFirstOpen) onFirstOpen(); // unblock startup
+        onFirstOpen = undefined;
+        return;
       }
 
       if (connection === 'close') {
@@ -152,8 +161,13 @@ export class WhatsAppChannel implements Channel {
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
+        const msgTypes = Object.keys(msg.message).join(',');
+        logger.info({ rawJid, msgTypes, fromMe: msg.key.fromMe }, 'WA incoming message');
+
         // Translate LID JID to phone JID if applicable
         const chatJid = await this.translateJid(rawJid);
+        const groups = this.opts.registeredGroups();
+        logger.info({ rawJid, chatJid, registered: !!groups[chatJid] }, 'WA JID check');
 
         const timestamp = new Date(
           Number(msg.messageTimestamp) * 1000,
@@ -164,14 +178,61 @@ export class WhatsAppChannel implements Channel {
         this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
 
         // Only deliver full message for registered groups
-        const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          // Extract text content from various message types
+          let content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+
+          // Handle media messages: documents, images, video, audio
+          const docMsg = msg.message?.documentMessage ||
+            msg.message?.documentWithCaptionMessage?.message?.documentMessage;
+          const imgMsg = msg.message?.imageMessage;
+          const vidMsg = msg.message?.videoMessage;
+          const audioMsg = msg.message?.audioMessage;
+          const hasMedia = !!(docMsg || imgMsg || vidMsg || audioMsg);
+
+          if (hasMedia) {
+            const fileName = (docMsg as any)?.fileName ||
+              (imgMsg ? 'image.jpg' : vidMsg ? 'video.mp4' : audioMsg ? 'audio.ogg' : 'file');
+            const mimeType = (docMsg || imgMsg || vidMsg || audioMsg)?.mimetype || 'application/octet-stream';
+            const caption = (docMsg as any)?.caption ||
+              msg.message?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
+              imgMsg?.caption || vidMsg?.caption || '';
+
+            if (!content && caption) content = caption;
+
+            // Download and save media file for registered groups
+            if (groups[chatJid]) {
+              try {
+                const buffer = await downloadMediaMessage(msg as WAMessage, 'buffer', {}) as Buffer;
+                if (buffer && buffer.length > 0) {
+                  const group = groups[chatJid];
+                  const ipcPath = resolveGroupIpcPath(group.folder);
+                  const inputDir = path.join(ipcPath, 'input');
+                  fs.mkdirSync(inputDir, { recursive: true });
+                  const safeName = `${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+                  fs.writeFileSync(path.join(inputDir, safeName), buffer);
+                  const sizeStr = buffer.length > 1024 * 1024
+                    ? `${(buffer.length / (1024 * 1024)).toFixed(1)}MB`
+                    : `${(buffer.length / 1024).toFixed(1)}KB`;
+                  const annotation = `[Attached: ${fileName} (${mimeType}, ${sizeStr}) \u2014 saved to /workspace/ipc/input/${safeName}]`;
+                  content = content ? `${content}\n${annotation}` : annotation;
+                  logger.info({ chatJid, filename: safeName, size: buffer.length, mimeType }, 'WA media saved');
+                }
+              } catch (err) {
+                logger.warn({ chatJid, fileName, err }, 'Failed to download WA media');
+                const annotation = `[Attached: ${fileName} (${mimeType}) \u2014 download failed]`;
+                content = content ? `${content}\n${annotation}` : annotation;
+              }
+            } else {
+              // Unregistered - just note the document
+              if (!content) content = `[Document: ${fileName} (${mimeType})]`;
+            }
+          }
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           if (!content) continue;
@@ -299,7 +360,7 @@ export class WhatsAppChannel implements Channel {
 
     // Query Baileys' signal repository for the mapping
     try {
-      const pn = await this.sock.signalRepository?.lidMapping?.getPNForLID(jid);
+      const pn = await (this.sock.signalRepository as any)?.lidMapping?.getPNForLID(jid);
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;

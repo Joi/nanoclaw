@@ -1,7 +1,11 @@
+import Database from "better-sqlite3";
+import os from "os";
 import fs from 'fs';
 import path from 'path';
 
 import { resolveGroupIpcPath } from '../group-folder.js';
+import { ASSISTANT_NAME } from '../config.js';
+import { markdownToSignal } from '../format.js';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
 
@@ -21,6 +25,7 @@ export interface SignalChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
   signalCliUrl: string;
   signalAccount: string;
+  botUuid?: string;
   // Called when a DM arrives from an unregistered contact.
   // Returns true if the contact was auto-registered and the message should be stored.
   onNewContact?: (chatJid: string, senderName: string) => boolean;
@@ -55,6 +60,7 @@ interface SignalReceiveEntry {
         type: string;
       };
       attachments?: SignalAttachment[];
+      mentions?: Array<{ start: number; length: number; uuid: string }>;
     };
     syncMessage?: {
       sentMessage?: {
@@ -66,9 +72,66 @@ interface SignalReceiveEntry {
           type: string;
         };
         attachments?: SignalAttachment[];
+        mentions?: Array<{ start: number; length: number; uuid: string }>;
       };
     };
   };
+}
+
+
+/**
+ * Expand Signal mention placeholders (U+FFFC) into readable @name text.
+ * Resolves profile names from signal-cli's local SQLite database.
+ */
+let profileNameCache: Record<string, string> | undefined;
+
+function loadProfileNames(): Record<string, string> {
+  if (profileNameCache) return profileNameCache;
+  profileNameCache = {};
+  try {
+    const homedir = os.homedir();
+    const dataDir = path.join(homedir, '.local/share/signal-cli/data');
+    // Find the account directory (e.g. 692992.d/)
+    const entries = fs.readdirSync(dataDir).filter((e: string) => e.endsWith('.d'));
+    for (const dir of entries) {
+      const dbPath = path.join(dataDir, dir, 'account.db');
+      if (!fs.existsSync(dbPath)) continue;
+      const db = new Database(dbPath, { readonly: true });
+      const rows = db.prepare(
+        "SELECT aci, TRIM(COALESCE(profile_given_name,'') || ' ' || COALESCE(profile_family_name,'')) as name FROM recipient WHERE aci IS NOT NULL AND profile_given_name IS NOT NULL"
+      ).all() as Array<{ aci: string; name: string }>;
+      for (const row of rows) {
+        if (row.name.trim()) profileNameCache[row.aci] = row.name.trim();
+      }
+      db.close();
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to load signal-cli profile names');
+  }
+  return profileNameCache;
+}
+
+function expandMentions(
+  text: string,
+  mentions: Array<{ start: number; length: number; uuid: string }> | undefined,
+  botUuid: string,
+): string {
+  if (!mentions?.length || !text) return text;
+  const names = loadProfileNames();
+  const sorted = [...mentions].sort((a, b) => b.start - a.start);
+  let result = text;
+  for (const m of sorted) {
+    let name: string;
+    if (m.uuid === botUuid) {
+      name = ASSISTANT_NAME;
+    } else {
+      name = names[m.uuid] || m.uuid.slice(0, 8);
+    }
+    const before = result.slice(0, m.start);
+    const after = result.slice(m.start + m.length);
+    result = `${before}@${name}${after}`;
+  }
+  return result;
 }
 
 export class SignalChannel implements Channel {
@@ -77,9 +140,10 @@ export class SignalChannel implements Channel {
   private opts: SignalChannelOpts;
   private rpcUrl: string;
   private account: string;
+  private botUuid: string = '';
   private connected = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private outgoingQueue: Array<{ jid: string; text: string }> = [];
+  private outgoingQueue: Array<{ jid: string; text: string; textStyles?: string[] }> = [];
   private flushing = false;
   private polling = false;
   private rpcId = 0;
@@ -95,6 +159,7 @@ export class SignalChannel implements Channel {
     const baseUrl = opts.signalCliUrl.replace(/\/+$/, '');
     this.rpcUrl = `${baseUrl}/api/v1/rpc`;
     this.account = opts.signalAccount;
+    this.botUuid = opts.botUuid || "";
   }
 
   async connect(): Promise<void> {
@@ -141,8 +206,9 @@ export class SignalChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
+    const { text: formatted, textStyles } = markdownToSignal(text);
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ jid, text: formatted, textStyles });
       logger.info(
         { jid, length: text.length, queueSize: this.outgoingQueue.length },
         'Signal disconnected, message queued',
@@ -151,10 +217,10 @@ export class SignalChannel implements Channel {
     }
 
     try {
-      await this.sendViaRpc(jid, text);
-      logger.info({ jid, length: text.length }, 'Signal message sent');
+      await this.sendViaRpc(jid, formatted, textStyles);
+      logger.info({ jid, length: formatted.length, styles: textStyles.length }, 'Signal message sent');
     } catch (err) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ jid, text: formatted, textStyles });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send Signal message, queued',
@@ -336,7 +402,7 @@ export class SignalChannel implements Channel {
       await this.processInbound({
         source: envelope.source || envelope.sourceNumber || '',
         sourceName: envelope.sourceName,
-        message: dm.message || '',
+        message: expandMentions(dm.message || '', dm.mentions, this.botUuid),
         timestamp: dm.timestamp || envelope.timestamp || Date.now(),
         groupId: dm.groupInfo?.groupId,
         attachments: dm.attachments,
@@ -349,7 +415,7 @@ export class SignalChannel implements Channel {
       await this.processInbound({
         source: this.account, // sent by us
         sourceName: undefined,
-        message: sent.message || '',
+        message: expandMentions(sent.message || '', sent.mentions, this.botUuid),
         timestamp: sent.timestamp || envelope.timestamp || Date.now(),
         groupId: sent.groupInfo?.groupId,
         isFromMe: true,
@@ -461,7 +527,7 @@ export class SignalChannel implements Channel {
 
   // --- Sending ---
 
-  private async sendViaRpc(jid: string, text: string): Promise<void> {
+  private async sendViaRpc(jid: string, text: string, textStyles?: string[]): Promise<void> {
     const isGroup = jid.startsWith('sig:group:');
 
     let params: Record<string, unknown>;
@@ -481,6 +547,11 @@ export class SignalChannel implements Channel {
       };
     }
 
+    // Pass body-range styles if present (signal-cli 0.14.1+)
+    if (textStyles && textStyles.length > 0) {
+      params.textStyle = textStyles;
+    }
+
     const result = await this.rpc<{ timestamp: number }>('send', params);
     if (result === null) {
       throw new Error(`Signal send failed for ${jid}`);
@@ -496,7 +567,7 @@ export class SignalChannel implements Channel {
       logger.info({ count: this.outgoingQueue.length }, 'Flushing Signal outgoing queue');
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
-        await this.sendViaRpc(item.jid, item.text);
+        await this.sendViaRpc(item.jid, item.text, item.textStyles);
         logger.info({ jid: item.jid, length: item.text.length }, 'Queued Signal message sent');
       }
     } finally {
