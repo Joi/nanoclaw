@@ -642,18 +642,36 @@ export class SlackChannel implements Channel {
 
   /**
    * Expand all Slack user mentions (<@USERID>) to @RealName.
-   * The bot mention is handled separately by stripBotMention.
+   * Checks identity index first (registered users get their real name from
+   * people page), falls back to Slack API display name for unregistered users.
    */
   private async expandUserMentions(text: string): Promise<string> {
     const mentionPattern = /<@(U[A-Z0-9]+)>/g;
     const mentions = [...text.matchAll(mentionPattern)];
     if (mentions.length === 0) return text;
 
+    // Load identity index for registered user lookup
+    const indexPath = path.join(
+      process.env.HOME || '/Users/jibot',
+      'switchboard', 'ops', 'jibot', 'identity-index.json',
+    );
+    let identityIndex: Record<string, { name: string }> = {};
+    try {
+      identityIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+    } catch {
+      // No index available — fall back to Slack API for all
+    }
+
+    const ns = this.opts.namespace;
     let result = text;
     for (const match of mentions) {
       const uid = match[1];
       if (uid === this.botUserId) continue; // handled by stripBotMention
-      const name = await this.resolveUserName(uid);
+
+      // Check identity index first: slack:{namespace}:{userId}
+      const jid = ns ? `slack:${ns}:${uid}` : `slack:${uid}`;
+      const identity = identityIndex[jid];
+      const name = identity?.name || await this.resolveUserName(uid);
       result = result.replace(match[0], `@${name}`);
     }
     return result;
