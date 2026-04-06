@@ -2,6 +2,8 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import https from 'https';
+
 import {
   Browsers,
   DisconnectReason,
@@ -24,6 +26,19 @@ import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const WA_VERSION_URL = 'https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json';
+
+function fetchWaVersion(): Promise<[number, number, number] | undefined> {
+  return new Promise((resolve) => {
+    https.get(WA_VERSION_URL, { timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data).version); } catch { resolve(undefined); }
+      });
+    }).on('error', () => resolve(undefined));
+  });
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -59,6 +74,9 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+    // Fetch current WhatsApp Web version so the server doesn't reject us (405)
+    const version = await fetchWaVersion();
+
     this.sock = makeWASocket({
       auth: {
         creds: state.creds,
@@ -67,6 +85,7 @@ export class WhatsAppChannel implements Channel {
       printQRInTerminal: false,
       logger: logger as any,
       browser: Browsers.macOS('Chrome'),
+      ...(version && { version }),
     });
 
     this.sock.ev.on('connection.update', (update: any) => {

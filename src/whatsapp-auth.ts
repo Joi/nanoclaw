@@ -12,6 +12,8 @@ import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import readline from 'readline';
 
+import https from 'https';
+
 import {
   Browsers,
   DisconnectReason,
@@ -23,6 +25,19 @@ import {
 const AUTH_DIR = './store/auth';
 const QR_FILE = './store/qr-data.txt';
 const STATUS_FILE = './store/auth-status.txt';
+const WA_VERSION_URL = 'https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json';
+
+function fetchWaVersion(): Promise<[number, number, number] | undefined> {
+  return new Promise((resolve) => {
+    https.get(WA_VERSION_URL, { timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk: string) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data).version); } catch { resolve(undefined); }
+      });
+    }).on('error', () => resolve(undefined));
+  });
+}
 
 const logger = pino({
   level: 'warn', // Quiet logging - only show errors
@@ -54,6 +69,8 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     process.exit(0);
   }
 
+  const version = await fetchWaVersion();
+
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
@@ -62,6 +79,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     printQRInTerminal: false,
     logger: logger as any,
     browser: Browsers.macOS('Chrome'),
+    ...(version && { version }),
   });
 
   if (usePairingCode && phoneNumber && !state.creds.me) {

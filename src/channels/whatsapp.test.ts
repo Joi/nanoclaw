@@ -45,6 +45,24 @@ vi.mock('child_process', () => ({
   exec: vi.fn(),
 }));
 
+// Mock https (used for fetching latest WA version)
+vi.mock('https', () => ({
+  default: {
+    get: (_url: string, _opts: unknown, cb: (res: unknown) => void) => {
+      const body = JSON.stringify({ version: [2, 3000, 1035194821] });
+      const res = {
+        on: (event: string, handler: (data?: string) => void) => {
+          if (event === 'data') handler(body);
+          if (event === 'end') handler();
+          return res;
+        },
+      };
+      cb(res);
+      return { on: () => ({}) };
+    },
+  },
+}));
+
 // Build a fake WASocket that's an EventEmitter with the methods we need
 function createFakeSocket() {
   const ev = new EventEmitter();
