@@ -33,6 +33,8 @@ import {
   SLACK_4_BOT_TOKEN,
   SLACK_4_NAMESPACE,
   SLACK_4_SIGNING_SECRET,
+  EMAIL_CHANNEL_ENABLED,
+  EMAIL_INTAKE_ACCOUNT,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_ONLY,
   TIMEZONE,
@@ -45,6 +47,7 @@ import {
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { SignalChannel } from './channels/signal.js';
 import { SlackChannel } from './channels/slack.js';
+import { EmailChannel } from './channels/email.js';
 import { TelegramChannel } from './channels/telegram.js';
 import {
   ContainerOutput,
@@ -1124,6 +1127,30 @@ async function main(): Promise<void> {
       logger.info('WhatsApp channel connected');
     } catch (err) {
       logger.error({ err }, 'Failed to connect WhatsApp channel');
+    }
+  }
+
+  // Email channel v2 (if configured)
+  if (EMAIL_CHANNEL_ENABLED && EMAIL_INTAKE_ACCOUNT) {
+    const emailChannel = new EmailChannel({
+      ...channelOpts,
+      ownerSignalJid: 'sig:+819048411965',
+      sendSignalMessage: async (jid: string, text: string) => {
+        // Use the Signal channel to send approval notifications
+        const signalCh = channels.find((c) => c.name === 'signal');
+        if (signalCh) {
+          await signalCh.sendMessage(jid, text);
+        } else {
+          logger.warn({ jid }, 'No Signal channel available for email approval notification');
+        }
+      },
+    });
+    channels.push(emailChannel);
+    try {
+      await emailChannel.connect();
+      logger.info('Email channel v2 connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Email channel v2');
     }
   }
 
