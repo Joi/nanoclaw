@@ -251,14 +251,15 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     // buildVolumeMounts runs synchronously before the first await
     runContainerAgent(groupWithIntake, testInput, () => {});
 
-    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+    const claudeJsonCall = vi.mocked(fs.writeFileSync).mock.calls.find(
       ([filePath]) =>
-        typeof filePath === "string" && filePath.includes("settings.json"),
+        typeof filePath === "string" && filePath.includes("claude.json"),
     );
-    expect(settingsCall).toBeDefined();
-    const content = JSON.parse(settingsCall![1] as string);
+    expect(claudeJsonCall).toBeDefined();
+    const content = JSON.parse(claudeJsonCall![1] as string);
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers.qmd).toEqual({
+      type: "http",
       url: "http://host.docker.internal:7333/mcp",
     });
   });
@@ -271,14 +272,15 @@ describe("container-runner settings.json QMD MCP configuration", () => {
 
     runContainerAgent(groupWithFileServing, testInput, () => {});
 
-    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+    const claudeJsonCall = vi.mocked(fs.writeFileSync).mock.calls.find(
       ([filePath]) =>
-        typeof filePath === "string" && filePath.includes("settings.json"),
+        typeof filePath === "string" && filePath.includes("claude.json"),
     );
-    expect(settingsCall).toBeDefined();
-    const content = JSON.parse(settingsCall![1] as string);
+    expect(claudeJsonCall).toBeDefined();
+    const content = JSON.parse(claudeJsonCall![1] as string);
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers.qmd).toEqual({
+      type: "http",
       url: "http://host.docker.internal:7333/mcp",
     });
   });
@@ -303,20 +305,23 @@ describe("container-runner settings.json QMD MCP configuration", () => {
 
     runContainerAgent(testGroup, inputWithPorts, () => {});
 
-    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+    const claudeJsonCall = vi.mocked(fs.writeFileSync).mock.calls.find(
       ([filePath]) =>
-        typeof filePath === "string" && filePath.includes("settings.json"),
+        typeof filePath === "string" && filePath.includes("claude.json"),
     );
-    expect(settingsCall).toBeDefined();
-    const content = JSON.parse(settingsCall![1] as string);
+    expect(claudeJsonCall).toBeDefined();
+    const content = JSON.parse(claudeJsonCall![1] as string);
     expect(content.mcpServers).toBeDefined();
     expect(content.mcpServers['qmd-public']).toEqual({
+      type: "http",
       url: "http://host.docker.internal:7333/mcp",
     });
     expect(content.mcpServers['qmd-crm']).toEqual({
+      type: "http",
       url: "http://host.docker.internal:7334/mcp",
     });
     expect(content.mcpServers['qmd-domain-gidc']).toEqual({
+      type: "http",
       url: "http://host.docker.internal:7335/mcp",
     });
   });
@@ -329,12 +334,12 @@ describe("container-runner settings.json QMD MCP configuration", () => {
 
     runContainerAgent(testGroup, inputWithPorts, () => {});
 
-    const settingsCall = vi.mocked(fs.writeFileSync).mock.calls.find(
+    const claudeJsonCall = vi.mocked(fs.writeFileSync).mock.calls.find(
       ([filePath]) =>
-        typeof filePath === "string" && filePath.includes("settings.json"),
+        typeof filePath === "string" && filePath.includes("claude.json"),
     );
-    expect(settingsCall).toBeDefined();
-    const content = JSON.parse(settingsCall![1] as string);
+    expect(claudeJsonCall).toBeDefined();
+    const content = JSON.parse(claudeJsonCall![1] as string);
     expect(content.mcpServers).toBeDefined();
     expect(Object.keys(content.mcpServers)).toEqual(['qmd-public']);
   });
