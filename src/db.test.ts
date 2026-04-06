@@ -2,17 +2,23 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   _initTestDatabase,
+  createEmailApproval,
   createTask,
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getEmailApproval,
+  getEmailThreadSession,
   getLastBotMessageTimestamp,
   getMessagesSince,
   getNewMessages,
+  getPendingEmailApprovals,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
+  storeEmailThreadSession,
   storeMessage,
+  updateEmailApprovalStatus,
   updateTask,
 } from './db.js';
 import { formatMessages } from './router.js';
@@ -648,5 +654,119 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- Email channel tables ---
+
+describe("email thread sessions", () => {
+  it("creates and retrieves a thread session", () => {
+    _initTestDatabase();
+    storeEmailThreadSession({
+      thread_id: "thread_abc123",
+      subject: "Test subject",
+      participants: JSON.stringify(["alice@example.com", "bob@example.com"]),
+      last_message_at: "2026-04-06T10:00:00.000Z",
+      context_summary: "Discussion about scheduling",
+    });
+    const session = getEmailThreadSession("thread_abc123");
+    expect(session).toBeDefined();
+    expect(session!.subject).toBe("Test subject");
+    expect(session!.participants).toBe(
+      JSON.stringify(["alice@example.com", "bob@example.com"])
+    );
+    expect(session!.context_summary).toBe("Discussion about scheduling");
+  });
+
+  it("returns null for unknown thread", () => {
+    _initTestDatabase();
+    const session = getEmailThreadSession("nonexistent");
+    expect(session).toBeNull();
+  });
+
+  it("upserts thread session on conflict", () => {
+    _initTestDatabase();
+    storeEmailThreadSession({
+      thread_id: "thread_abc123",
+      subject: "Original subject",
+      participants: "[]",
+      last_message_at: "2026-04-06T10:00:00.000Z",
+      context_summary: "First message",
+    });
+    storeEmailThreadSession({
+      thread_id: "thread_abc123",
+      subject: "Original subject",
+      participants: "[]",
+      last_message_at: "2026-04-06T11:00:00.000Z",
+      context_summary: "Updated context",
+    });
+    const session = getEmailThreadSession("thread_abc123");
+    expect(session!.context_summary).toBe("Updated context");
+    expect(session!.last_message_at).toBe("2026-04-06T11:00:00.000Z");
+  });
+});
+
+describe("email approval queue", () => {
+  it("creates and retrieves a pending approval", () => {
+    _initTestDatabase();
+    createEmailApproval({
+      id: "approval_1",
+      sender_email: "unknown@external.com",
+      thread_id: "thread_xyz",
+      subject: "Help request",
+      inferred_intent: "action",
+      risk_summary: "Unknown sender requesting action",
+      status: "pending",
+      created_at: "2026-04-06T10:00:00.000Z",
+    });
+    const approval = getEmailApproval("approval_1");
+    expect(approval).toBeDefined();
+    expect(approval!.sender_email).toBe("unknown@external.com");
+    expect(approval!.status).toBe("pending");
+  });
+
+  it("updates approval status", () => {
+    _initTestDatabase();
+    createEmailApproval({
+      id: "approval_2",
+      sender_email: "someone@external.com",
+      thread_id: "thread_abc",
+      subject: "Question",
+      inferred_intent: "intake",
+      risk_summary: "Unknown sender",
+      status: "pending",
+      created_at: "2026-04-06T10:00:00.000Z",
+    });
+    updateEmailApprovalStatus("approval_2", "approved", "2026-04-06T10:05:00.000Z");
+    const approval = getEmailApproval("approval_2");
+    expect(approval!.status).toBe("approved");
+    expect(approval!.resolved_at).toBe("2026-04-06T10:05:00.000Z");
+  });
+
+  it("lists pending approvals", () => {
+    _initTestDatabase();
+    createEmailApproval({
+      id: "a1",
+      sender_email: "x@y.com",
+      thread_id: "t1",
+      subject: "S1",
+      inferred_intent: "action",
+      risk_summary: "R1",
+      status: "pending",
+      created_at: "2026-04-06T10:00:00.000Z",
+    });
+    createEmailApproval({
+      id: "a2",
+      sender_email: "z@y.com",
+      thread_id: "t2",
+      subject: "S2",
+      inferred_intent: "intake",
+      risk_summary: "R2",
+      status: "approved",
+      created_at: "2026-04-06T09:00:00.000Z",
+    });
+    const pending = getPendingEmailApprovals();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].id).toBe("a1");
   });
 });

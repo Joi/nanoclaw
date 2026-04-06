@@ -82,6 +82,27 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS email_thread_sessions (
+      thread_id TEXT PRIMARY KEY,
+      subject TEXT NOT NULL,
+      participants TEXT NOT NULL,
+      last_message_at TEXT NOT NULL,
+      context_summary TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS email_approvals (
+      id TEXT PRIMARY KEY,
+      sender_email TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      inferred_intent TEXT NOT NULL,
+      risk_summary TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_approvals_status ON email_approvals(status);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -767,4 +788,110 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Email channel types and functions ---
+
+export interface EmailThreadSessionRow {
+  thread_id: string;
+  subject: string;
+  participants: string;
+  last_message_at: string;
+  context_summary: string | null;
+}
+
+export interface EmailApprovalRow {
+  id: string;
+  sender_email: string;
+  thread_id: string;
+  subject: string;
+  inferred_intent: string;
+  risk_summary: string;
+  status: string;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export function storeEmailThreadSession(session: {
+  thread_id: string;
+  subject: string;
+  participants: string;
+  last_message_at: string;
+  context_summary?: string;
+}): void {
+  db.prepare(`
+    INSERT INTO email_thread_sessions (thread_id, subject, participants, last_message_at, context_summary)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(thread_id) DO UPDATE SET
+      participants = excluded.participants,
+      last_message_at = excluded.last_message_at,
+      context_summary = excluded.context_summary
+  `).run(
+    session.thread_id,
+    session.subject,
+    session.participants,
+    session.last_message_at,
+    session.context_summary ?? null,
+  );
+}
+
+export function getEmailThreadSession(threadId: string): EmailThreadSessionRow | null {
+  return (
+    db
+      .prepare(
+        'SELECT * FROM email_thread_sessions WHERE thread_id = ?',
+      )
+      .get(threadId) as EmailThreadSessionRow | undefined
+  ) ?? null;
+}
+
+export function createEmailApproval(approval: {
+  id: string;
+  sender_email: string;
+  thread_id: string;
+  subject: string;
+  inferred_intent: string;
+  risk_summary: string;
+  status: string;
+  created_at: string;
+}): void {
+  db.prepare(`
+    INSERT INTO email_approvals (id, sender_email, thread_id, subject, inferred_intent, risk_summary, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    approval.id,
+    approval.sender_email,
+    approval.thread_id,
+    approval.subject,
+    approval.inferred_intent,
+    approval.risk_summary,
+    approval.status,
+    approval.created_at,
+  );
+}
+
+export function getEmailApproval(id: string): EmailApprovalRow | null {
+  return (
+    db
+      .prepare('SELECT * FROM email_approvals WHERE id = ?')
+      .get(id) as EmailApprovalRow | undefined
+  ) ?? null;
+}
+
+export function updateEmailApprovalStatus(
+  id: string,
+  status: string,
+  resolvedAt?: string,
+): void {
+  db.prepare(
+    'UPDATE email_approvals SET status = ?, resolved_at = ? WHERE id = ?',
+  ).run(status, resolvedAt ?? null, id);
+}
+
+export function getPendingEmailApprovals(): EmailApprovalRow[] {
+  return db
+    .prepare(
+      'SELECT * FROM email_approvals WHERE status = ? ORDER BY created_at ASC',
+    )
+    .all('pending') as EmailApprovalRow[];
 }
