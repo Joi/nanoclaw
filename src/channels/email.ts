@@ -1,8 +1,11 @@
 /**
- * Email channel — polls Gmail for emails from the owner.
- * URL-only emails are sent to the bookmark relay.
- * Natural language emails are delivered as messages to the agent pipeline.
- * Replies are sent via reply-all to preserve thread context.
+ * Email Channel v2 — first-class NanoClaw channel.
+ *
+ * Polls Gmail for emails addressed to jibot@ito.com (and +action/+intake aliases).
+ * Resolves sender identity, classifies intent, enforces policy, executes actions,
+ * creates receipts, and replies in-thread with sanitized recipients.
+ *
+ * Replaces the dormant v1 email channel and legacy email-intake pipeline.
  */
 
 import { execFile } from 'child_process';
@@ -12,13 +15,27 @@ import { promisify } from 'util';
 
 import {
   BOOKMARK_RELAY_URL,
+  CONFIDENTIAL_ROOT,
   DATA_DIR,
+  EMAIL_ALIAS_MAP_PATH,
+  EMAIL_CALENDAR_ID,
+  EMAIL_CHANNEL_POLL_INTERVAL,
+  EMAIL_IDENTITY_INDEX_PATH,
   EMAIL_INTAKE_ACCOUNT,
-  EMAIL_INTAKE_FROM_FILTER,
-  EMAIL_INTAKE_POLL_INTERVAL,
   GOG_BIN,
   GOG_KEYRING_PASSWORD,
 } from '../config.js';
+import { extractSenderEmail, isJibotAddress, parseEmailAlias, EmailAlias } from '../email-address-parser.js';
+import { EmailApprovalGate } from '../email-approval-gate.js';
+import { filterAttachments } from '../email-attachment-filter.js';
+import { CalendarAdapter } from '../email-calendar-adapter.js';
+import { EmailIdentityResolver, IdentityResult } from '../email-identity-resolver.js';
+import { resolveEmailIntent, IntentResult } from '../email-intent-resolver.js';
+import { checkEmailPolicy } from '../email-policy-adapter.js';
+import { createEmailReceipt } from '../email-receipt.js';
+import { ReminderAdapter } from '../email-reminder-adapter.js';
+import { sanitizeReplyRecipients } from '../email-reply-sanitizer.js';
+import { EmailThreadSessionStore } from '../email-thread-session.js';
 import { logger } from '../logger.js';
 import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup } from '../types.js';
 
@@ -26,35 +43,9 @@ const execFileAsync = promisify(execFile);
 
 const LABEL_NAME = 'nanoclaw-processed';
 const GOG_TIMEOUT = 30_000;
-const RELAY_TIMEOUT = 90_000;
-const MAX_BODY_LENGTH = 10_000; // Truncate very long email bodies
+const MAX_BODY_LENGTH = 10_000;
 
-// URL patterns to reject (noise from forwarded emails)
-const REJECT_PATTERNS = [
-  /teams\.microsoft\.com/i,
-  /aka\.ms\//i,
-  /google\.com\/calendar/i,
-  /dialin\.teams/i,
-  /unsubscribe/i,
-  /manage.*preferences/i,
-  /tracking/i,
-  /click\./i,
-  /open\./i,
-  /^tel:/i,
-  /^mailto:/i,
-];
-
-const MIN_URL_LENGTH = 15;
-// Threshold: if non-URL text is under this many chars, treat as URL-only
-const URL_ONLY_TEXT_THRESHOLD = 50;
-
-export interface EmailChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
-
-// --- gog JSON types ---
+// --- gog JSON types (preserved from v1) ---
 
 interface GogListResponse {
   threads?: GogThread[];
@@ -111,10 +102,27 @@ interface DownloadedAttachment {
   size: number;
 }
 
-interface ReplyContext {
-  messageId: string;
-  threadId: string;
+// --- Parsed email message ---
+
+interface ParsedEmailMessage {
+  from: string;
+  to: string;
+  cc: string;
   subject: string;
+  date: string;
+  body: string;
+  rfc822MessageId: string;
+  attachments: AttachmentInfo[];
+}
+
+export interface EmailChannelOpts {
+  onMessage: OnInboundMessage;
+  onChatMetadata: OnChatMetadata;
+  registeredGroups: () => Record<string, RegisteredGroup>;
+  sendSignalMessage?: (jid: string, text: string) => Promise<void>;
+  ownerSignalJid?: string;
+  /** Override for testing: set to true to skip gog calls */
+  dryRun?: boolean;
 }
 
 export class EmailChannel implements Channel {
@@ -124,11 +132,37 @@ export class EmailChannel implements Channel {
   private connected = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
-  // Most recent reply context per JID for threading
-  private replyContext = new Map<string, ReplyContext>();
+
+  // Components
+  private identityResolver: EmailIdentityResolver;
+  private approvalGate: EmailApprovalGate;
+  private threadStore: EmailThreadSessionStore;
+  private calendarAdapter: CalendarAdapter;
+  private reminderAdapter: ReminderAdapter;
 
   constructor(opts: EmailChannelOpts) {
     this.opts = opts;
+
+    this.identityResolver = new EmailIdentityResolver(
+      EMAIL_IDENTITY_INDEX_PATH,
+      EMAIL_ALIAS_MAP_PATH,
+    );
+
+    this.approvalGate = new EmailApprovalGate({
+      ownerSignalJid: opts.ownerSignalJid || '',
+      sendSignalMessage: opts.sendSignalMessage || (async () => {}),
+    });
+
+    this.threadStore = new EmailThreadSessionStore();
+
+    this.calendarAdapter = new CalendarAdapter({
+      gogBin: GOG_BIN,
+      account: EMAIL_INTAKE_ACCOUNT,
+      calendarId: EMAIL_CALENDAR_ID,
+      keyringPassword: GOG_KEYRING_PASSWORD,
+    });
+
+    this.reminderAdapter = new ReminderAdapter();
   }
 
   async connect(): Promise<void> {
@@ -145,42 +179,32 @@ export class EmailChannel implements Channel {
       this.poll().catch((err) =>
         logger.warn({ err }, 'Email channel: poll error'),
       );
-    }, EMAIL_INTAKE_POLL_INTERVAL);
+    }, EMAIL_CHANNEL_POLL_INTERVAL);
 
     logger.info(
-      { account: EMAIL_INTAKE_ACCOUNT, from: EMAIL_INTAKE_FROM_FILTER },
-      'Email channel connected, polling started',
+      { account: EMAIL_INTAKE_ACCOUNT, interval: EMAIL_CHANNEL_POLL_INTERVAL },
+      'Email channel v2 connected, polling started',
     );
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const ctx = this.replyContext.get(jid);
-
+    // For email, sendMessage sends a new email (fallback path).
+    // Thread-aware replies use sendReply() instead.
+    const recipient = jid.replace(/^email:/, '');
     const args = [
       'gmail', 'send',
       '--account', EMAIL_INTAKE_ACCOUNT,
+      '--to', recipient,
+      '--subject', 'Message from jibot',
+      '--body-file', '-',
       '-y',
     ];
 
-    if (ctx?.messageId) {
-      // Reply-all within existing thread
-      args.push('--reply-to-message-id', ctx.messageId);
-      args.push('--reply-all');
-      args.push('--subject', `Re: ${ctx.subject}`);
-    } else {
-      // Fallback: send new email to owner
-      const recipient = jid.replace(/^email:/, '');
-      args.push('--to', recipient);
-      args.push('--subject', 'Message from jibot');
-    }
-
-    args.push('--body-file', '-'); // read body from stdin
-
     try {
       await this.callGogWithStdin(args, text);
-      logger.info({ jid, length: text.length }, 'Email reply sent');
+      logger.info({ jid, length: text.length }, 'Email message sent');
     } catch (err) {
-      logger.error({ jid, err }, 'Failed to send email reply');
+      logger.error({ jid, err }, 'Failed to send email message');
       throw err;
     }
   }
@@ -199,7 +223,37 @@ export class EmailChannel implements Channel {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
-    logger.info('Email channel disconnected');
+    logger.info('Email channel v2 disconnected');
+  }
+
+  // --- Reply in thread ---
+
+  private async sendReply(
+    messageId: string,
+    subject: string,
+    recipients: string[],
+    body: string,
+  ): Promise<void> {
+    const args = [
+      'gmail', 'send',
+      '--account', EMAIL_INTAKE_ACCOUNT,
+      '--reply-to-message-id', messageId,
+      '--to', recipients.join(','),
+      '--subject', `Re: ${subject}`,
+      '--body-file', '-',
+      '-y',
+    ];
+
+    try {
+      await this.callGogWithStdin(args, body);
+      logger.info(
+        { messageId, recipients: recipients.length, length: body.length },
+        'Email reply sent',
+      );
+    } catch (err) {
+      logger.error({ messageId, err }, 'Failed to send email reply');
+      throw err;
+    }
   }
 
   // --- Polling ---
@@ -215,10 +269,10 @@ export class EmailChannel implements Channel {
   }
 
   private async doPoll(): Promise<void> {
-    // List unprocessed emails from owner
     let threads: GogThread[];
     try {
-      const query = `from:${EMAIL_INTAKE_FROM_FILTER} -label:${LABEL_NAME}`;
+      // Query for unprocessed emails addressed to any jibot address
+      const query = `to:jibot@ito.com -label:${LABEL_NAME}`;
       const raw = await this.callGog([
         'gmail', 'list', '-j',
         '--account', EMAIL_INTAKE_ACCOUNT,
@@ -250,7 +304,7 @@ export class EmailChannel implements Channel {
   }
 
   private async processThread(thread: GogThread): Promise<void> {
-    // Fetch full thread with all messages
+    // Fetch full thread
     let threadDetail: GogThreadDetail;
     try {
       const raw = await this.callGog([
@@ -268,131 +322,346 @@ export class EmailChannel implements Channel {
     const messages = threadDetail.thread?.messages;
     if (!messages || messages.length === 0) return;
 
-    // Parse all messages in thread
+    // Parse all messages
     const parsed = messages.map((m) => this.parseMessage(m));
-
-    // Collect all attachments across the thread (deduplicate by filename)
-    const allAttachments: AttachmentInfo[] = [];
-    const seenFilenames = new Set<string>();
-    for (const m of parsed) {
-      for (const att of m.attachments) {
-        if (!seenFilenames.has(att.filename)) {
-          seenFilenames.add(att.filename);
-          allAttachments.push(att);
-        }
-      }
-    }
-
-    // Classify based on the newest message (last in array)
     const newest = parsed[parsed.length - 1];
-    const latestMessage = messages[messages.length - 1];
+    const latestGogMsg = messages[messages.length - 1];
     const subject = newest.subject || thread.subject || '(no subject)';
-    let classification = this.classifyEmail(newest.body);
-    // Override: if subject contains a #ws: tag, force agent classification
-    // so workstream-tagged emails always reach the jibrain intake hook
-    if (classification === 'bookmark' && /#ws:[a-z0-9_:-]+/i.test(subject)) {
-      classification = 'agent';
-      logger.info({ threadId: thread.id, subject }, 'Email channel: ws: tag in subject, forcing agent classification');
+
+    // Event: email.received
+    logger.info(
+      { threadId: thread.id, subject, from: newest.from, messageCount: messages.length },
+      'email.received',
+    );
+
+    // Determine which jibot alias was used
+    const allRecipients = this.collectRecipients(parsed);
+    const jibotAlias = this.detectJibotAlias(allRecipients);
+
+    if (!jibotAlias) {
+      // Not addressed to jibot — skip (shouldn't happen with query filter)
+      logger.debug({ threadId: thread.id }, 'Email channel: no jibot address found, skipping');
+      await this.markProcessed(thread.id);
+      return;
     }
-    // Override: if email has attachments, always route to agent (never bookmark)
-    if (classification === 'bookmark' && allAttachments.length > 0) {
-      classification = 'agent';
-      logger.info(
-        { threadId: thread.id, attachmentCount: allAttachments.length },
-        'Email channel: has attachments, forcing agent classification',
-      );
+
+    // Resolve sender identity
+    const senderEmail = extractSenderEmail(newest.from);
+    const identity = this.identityResolver.resolve(senderEmail);
+
+    if (!identity.resolved) {
+      // Unknown sender — send to approval gate
+      logger.info({ senderEmail, threadId: thread.id }, 'email.sender.unresolved');
+
+      if (!this.approvalGate.hasPendingApproval(senderEmail)) {
+        await this.approvalGate.requestApproval({
+          senderEmail,
+          threadId: thread.id,
+          subject,
+          inferredIntent: jibotAlias === 'action' ? 'action' : jibotAlias === 'intake' ? 'intake' : 'unknown',
+          riskSummary: `Unknown sender "${newest.from}" attempted to contact jibot via ${jibotAlias} alias`,
+        });
+      }
+
+      await this.markProcessed(thread.id);
+      return;
     }
 
     logger.info(
-      { threadId: thread.id, subject, classification, messageCount: messages.length, attachmentCount: allAttachments.length },
-      'Email channel: classified thread',
+      { senderEmail, tier: identity.tier, name: identity.name },
+      'email.sender.resolved',
     );
 
-    if (classification === 'bookmark') {
-      // URL-only: extract and bookmark
-      const urls = extractUrls(newest.body);
-      // Extract ws: tag from subject for relay passthrough to bookmark-relay
-      const wsMatch = subject.match(/#(ws:[a-z0-9_:-]+)/i);
-      const relayTags = wsMatch ? [wsMatch[1]] : [];
-      let relayFailed = false;
-      for (const url of urls) {
-        const ok = await bookmarkViaRelay(url, relayTags);
-        if (!ok) {
-          relayFailed = true;
-          break;
-        }
-        logger.info({ url }, 'Email channel: bookmarked URL');
-      }
-      if (relayFailed) {
-        logger.warn({ threadId: thread.id }, 'Email channel: relay down, will retry');
-        return; // Don't mark processed — retry next poll
-      }
-    } else {
-      // Natural language: deliver as message to agent pipeline
-      const chatJid = `email:${EMAIL_INTAKE_FROM_FILTER}`;
-      const timestamp = newest.date
-        ? new Date(newest.date).toISOString()
-        : new Date().toISOString();
+    // Resolve intent
+    const intentResult = resolveEmailIntent(
+      jibotAlias,
+      identity.tier || 'unknown',
+      newest.body,
+    );
 
-      // Download attachments to the email group's IPC input directory
-      const downloaded = await this.downloadAttachments(allAttachments, 'email-joi');
+    logger.info(
+      { intent: intentResult.intent, subtype: intentResult.actionSubtype, confidence: intentResult.confidence },
+      'email.intent.resolved',
+    );
 
-      // Format full thread as message content (with attachment info)
-      const content = this.formatThread(parsed, subject, downloaded);
+    // Check policy
+    const policy = checkEmailPolicy(
+      identity.tier || 'unknown',
+      intentResult.intent,
+      intentResult.actionSubtype,
+    );
 
-      // Store reply context for reply-all
-      this.replyContext.set(chatJid, {
-        messageId: latestMessage.id,
-        threadId: thread.id,
-        subject,
-      });
-
-      const msgId = `email_${latestMessage.id}_${thread.id}`;
-
-      // Notify chat metadata
-      this.opts.onChatMetadata(chatJid, timestamp, newest.from, 'email', false);
-
-      const newMsg: NewMessage = {
-        id: msgId,
-        chat_jid: chatJid,
-        sender: EMAIL_INTAKE_FROM_FILTER,
-        sender_name: newest.from || EMAIL_INTAKE_FROM_FILTER,
-        content,
-        timestamp,
-        is_from_me: false,
-        is_bot_message: false,
-      };
-
-      this.opts.onMessage(chatJid, newMsg);
+    if (!policy.allowed) {
+      logger.warn(
+        { senderEmail, tier: identity.tier, intent: intentResult.intent, reason: policy.reason },
+        'email.policy.denied',
+      );
+      await this.markProcessed(thread.id);
+      return;
     }
 
-    // Mark thread as processed (label + archive)
+    // Build known emails set for reply sanitization
+    const knownEmails = this.buildKnownEmailsSet();
+
+    // Sanitize reply recipients
+    const replyRecipients = sanitizeReplyRecipients(
+      newest.from,
+      allRecipients,
+      knownEmails,
+    );
+
+    // Execute based on intent
+    switch (intentResult.intent) {
+      case 'action':
+        await this.handleAction(
+          intentResult, parsed, newest, latestGogMsg, thread.id, subject,
+          senderEmail, identity, replyRecipients,
+        );
+        break;
+
+      case 'intake':
+        await this.handleIntake(
+          parsed, newest, latestGogMsg, thread.id, subject,
+          senderEmail, identity, replyRecipients,
+        );
+        break;
+
+      case 'clarify':
+        await this.handleClarify(
+          intentResult, latestGogMsg.id, subject, replyRecipients,
+        );
+        break;
+    }
+
+    // Save thread session
+    this.threadStore.save({
+      threadId: thread.id,
+      subject,
+      participants: allRecipients.filter((r) => !isJibotAddress(r)),
+      lastMessageAt: newest.date || new Date().toISOString(),
+      contextSummary: `${intentResult.intent}: ${newest.body.slice(0, 200)}`,
+    });
+
+    // Mark thread as processed
+    await this.markProcessed(thread.id);
+  }
+
+  // --- Intent handlers ---
+
+  private async handleAction(
+    intentResult: IntentResult,
+    allParsed: ParsedEmailMessage[],
+    newest: ParsedEmailMessage,
+    latestGogMsg: GogMessageDetail,
+    threadId: string,
+    subject: string,
+    senderEmail: string,
+    identity: IdentityResult,
+    replyRecipients: string[],
+  ): Promise<void> {
+    let actionResult: string;
+
+    switch (intentResult.actionSubtype) {
+      case 'calendar': {
+        // For now, deliver as a message to the agent pipeline for parsing
+        // The agent will use gog calendar create with parsed details
+        actionResult = 'Calendar scheduling request received. Delivering to agent pipeline for execution.';
+        break;
+      }
+      case 'reminder': {
+        actionResult = 'Reminder request received. Delivering to agent pipeline for execution.';
+        break;
+      }
+      default: {
+        actionResult = 'Action request received. Delivering to agent pipeline for execution.';
+        break;
+      }
+    }
+
+    // Deliver as message to agent pipeline (reusing existing pattern)
+    const chatJid = `email:${senderEmail}`;
+    const timestamp = newest.date
+      ? new Date(newest.date).toISOString()
+      : new Date().toISOString();
+
+    // Format thread content for agent
+    const content = this.formatThreadForAgent(allParsed, subject, intentResult);
+
+    this.opts.onChatMetadata(chatJid, timestamp, identity.name || senderEmail, 'email', false);
+
+    const msgId = `email_${latestGogMsg.id}_${threadId}`;
+    const newMsg: NewMessage = {
+      id: msgId,
+      chat_jid: chatJid,
+      sender: senderEmail,
+      sender_name: identity.name || senderEmail,
+      content,
+      timestamp,
+      is_from_me: false,
+      is_bot_message: false,
+      thread_id: threadId,
+    };
+
+    this.opts.onMessage(chatJid, newMsg);
+
+    // Create receipt artifact
+    createEmailReceipt(
+      path.join(CONFIDENTIAL_ROOT, 'email-receipts'),
+      {
+        type: 'action',
+        senderEmail,
+        senderName: identity.name || senderEmail,
+        subject,
+        threadId,
+        timestamp,
+        body: newest.body,
+        actionSubtype: intentResult.actionSubtype,
+        actionResult,
+      },
+    );
+
+    logger.info(
+      { threadId, subtype: intentResult.actionSubtype, sender: senderEmail },
+      'email.execution.success',
+    );
+  }
+
+  private async handleIntake(
+    allParsed: ParsedEmailMessage[],
+    newest: ParsedEmailMessage,
+    latestGogMsg: GogMessageDetail,
+    threadId: string,
+    subject: string,
+    senderEmail: string,
+    identity: IdentityResult,
+    replyRecipients: string[],
+  ): Promise<void> {
+    const timestamp = newest.date
+      ? new Date(newest.date).toISOString()
+      : new Date().toISOString();
+
+    // Create intake receipt
+    const receiptPath = createEmailReceipt(
+      path.join(CONFIDENTIAL_ROOT, 'email-receipts'),
+      {
+        type: 'intake',
+        senderEmail,
+        senderName: identity.name || senderEmail,
+        subject,
+        threadId,
+        timestamp,
+        body: newest.body,
+      },
+    );
+
+    // Send receipt reply
+    const receiptBody = [
+      `✅ Captured for reference.`,
+      ``,
+      `Subject: ${subject}`,
+      `From: ${identity.name || senderEmail}`,
+      `Saved: ${path.basename(receiptPath)}`,
+    ].join('\n');
+
     try {
-      await this.callGog([
-        'gmail', 'thread', 'modify', thread.id,
-        '--add', LABEL_NAME,
-        '--remove', 'INBOX',
-        '--account', EMAIL_INTAKE_ACCOUNT,
-      ]);
-      logger.info({ threadId: thread.id }, 'Email channel: marked processed');
+      await this.sendReply(latestGogMsg.id, subject, replyRecipients, receiptBody);
+      logger.info({ threadId }, 'email.reply.sent');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error({ threadId: thread.id, error: msg }, 'Email channel: failed to label thread');
+      logger.error({ threadId, err }, 'email.reply.failed');
+    }
+
+    logger.info(
+      { threadId, sender: senderEmail, receiptPath },
+      'email.receipt.created',
+    );
+  }
+
+  private async handleClarify(
+    intentResult: IntentResult,
+    messageId: string,
+    subject: string,
+    replyRecipients: string[],
+  ): Promise<void> {
+    const clarifyBody = intentResult.reason
+      || 'I wasn\'t sure whether to act on this or capture it. Could you clarify? You can also resend to jibot+action@ito.com (to execute) or jibot+intake@ito.com (to capture).';
+
+    try {
+      await this.sendReply(messageId, subject, replyRecipients, clarifyBody);
+      logger.info({ messageId }, 'email.reply.sent (clarify)');
+    } catch (err) {
+      logger.error({ messageId, err }, 'email.reply.failed (clarify)');
     }
   }
 
-  // --- Message parsing ---
+  // --- Helper methods ---
 
-  private parseMessage(msg: GogMessageDetail): {
-    from: string;
-    to: string;
-    cc: string;
-    subject: string;
-    date: string;
-    body: string;
-    rfc822MessageId: string;
-    attachments: AttachmentInfo[];
-  } {
+  private collectRecipients(messages: ParsedEmailMessage[]): string[] {
+    const all = new Set<string>();
+    for (const m of messages) {
+      for (const field of [m.to, m.cc, m.from]) {
+        if (!field) continue;
+        for (const addr of field.split(',')) {
+          const email = extractSenderEmail(addr.trim());
+          if (email) all.add(email);
+        }
+      }
+    }
+    return [...all];
+  }
+
+  private detectJibotAlias(recipients: string[]): EmailAlias | null {
+    // Check all recipients for jibot addresses, preferring explicit aliases
+    let foundPlain = false;
+    for (const email of recipients) {
+      const alias = parseEmailAlias(email);
+      if (alias === 'action' || alias === 'intake') return alias;
+      if (alias === 'plain') foundPlain = true;
+    }
+    return foundPlain ? 'plain' : null;
+  }
+
+  private buildKnownEmailsSet(): Set<string> {
+    // Build from identity index + alias map
+    // For now, reload the resolver and extract known emails
+    this.identityResolver.reload();
+    // Simple approach: known emails are in the alias map + identity index
+    // This will be populated at runtime; for now return empty set
+    // TODO: Wire this properly from identity-index + alias-map
+    const known = new Set<string>();
+    known.add('jibot@ito.com');
+    known.add('joi@ito.com');
+    return known;
+  }
+
+  private formatThreadForAgent(
+    messages: ParsedEmailMessage[],
+    subject: string,
+    intentResult: IntentResult,
+  ): string {
+    const participants = new Set<string>();
+    for (const m of messages) {
+      if (m.to) m.to.split(',').forEach((p) => participants.add(p.trim()));
+      if (m.cc) m.cc.split(',').forEach((p) => participants.add(p.trim()));
+      if (m.from) participants.add(m.from.trim());
+    }
+
+    const lines: string[] = [
+      `[Email Thread] Subject: ${subject}`,
+      `Intent: ${intentResult.intent}${intentResult.actionSubtype ? ` (${intentResult.actionSubtype})` : ''}`,
+      `Participants: ${[...participants].join(', ')}`,
+      '',
+    ];
+
+    for (const m of messages) {
+      lines.push(`--- ${m.from} (${m.date}) ---`);
+      lines.push(m.body.trim());
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  private parseMessage(msg: GogMessageDetail): ParsedEmailMessage {
     const headers: Record<string, string> = {};
     for (const h of msg.payload?.headers || []) {
       headers[h.name] = h.value;
@@ -403,7 +672,6 @@ export class EmailChannel implements Channel {
       body = body.slice(0, MAX_BODY_LENGTH) + '\n[... truncated]';
     }
 
-    // Extract attachment metadata from MIME parts
     const attachments: AttachmentInfo[] = [];
     const collectAttachments = (parts: GogPartDetail[] | undefined) => {
       if (!parts) return;
@@ -417,10 +685,7 @@ export class EmailChannel implements Channel {
             size: part.body.size || 0,
           });
         }
-        // Recurse into nested parts (multipart/mixed inside multipart/alternative)
-        if (part.parts) {
-          collectAttachments(part.parts);
-        }
+        if (part.parts) collectAttachments(part.parts);
       }
     };
     collectAttachments(msg.payload?.parts);
@@ -437,134 +702,20 @@ export class EmailChannel implements Channel {
     };
   }
 
-  private formatThread(
-    messages: Array<{ from: string; to: string; cc: string; subject: string; date: string; body: string; rfc822MessageId: string; attachments: AttachmentInfo[] }>,
-    subject: string,
-    downloadedAttachments: DownloadedAttachment[],
-  ): string {
-    const participants = new Set<string>();
-    for (const m of messages) {
-      if (m.to) m.to.split(',').forEach((p) => participants.add(p.trim()));
-      if (m.cc) m.cc.split(',').forEach((p) => participants.add(p.trim()));
-      if (m.from) participants.add(m.from.trim());
+  private async markProcessed(threadId: string): Promise<void> {
+    try {
+      await this.callGog([
+        'gmail', 'thread', 'modify', threadId,
+        '--add', LABEL_NAME,
+        '--remove', 'INBOX',
+        '--account', EMAIL_INTAKE_ACCOUNT,
+      ]);
+      logger.info({ threadId }, 'Email channel: marked processed');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ threadId, error: msg }, 'Email channel: failed to label thread');
     }
-
-    // Build Mail.app link from the latest message's RFC 822 Message-ID
-    const latestMsgId = messages[messages.length - 1]?.rfc822MessageId || '';
-    const mailAppLink = latestMsgId
-      ? `message://${encodeURIComponent(latestMsgId)}`
-      : '';
-
-    const lines: string[] = [
-      `[Email Thread] Subject: ${subject}`,
-      `Participants: ${[...participants].join(', ')}`,
-    ];
-    if (mailAppLink) {
-      lines.push(`Mail.app link: ${mailAppLink}`);
-    }
-
-    // Include attachment info so the agent knows about downloaded files
-    if (downloadedAttachments.length > 0) {
-      lines.push('');
-      lines.push(`Attachments (${downloadedAttachments.length} files downloaded to /workspace/ipc/input/):`);
-      for (const att of downloadedAttachments) {
-        const sizeMB = (att.size / (1024 * 1024)).toFixed(1);
-        lines.push(`  - ${att.filename} (${att.mimeType}, ${sizeMB} MB) → ${att.containerPath}`);
-      }
-    }
-
-    lines.push('');
-
-    for (const m of messages) {
-      lines.push(`--- ${m.from} (${m.date}) ---`);
-      lines.push(m.body.trim());
-      lines.push('');
-    }
-
-    return lines.join('\n');
   }
-
-  // --- Attachment downloading ---
-
-  private async downloadAttachments(
-    attachments: AttachmentInfo[],
-    groupFolder: string,
-  ): Promise<DownloadedAttachment[]> {
-    if (attachments.length === 0) return [];
-
-    // Download to the group's IPC input directory (mounted at /workspace/ipc/input/ in container)
-    const inputDir = path.resolve(DATA_DIR, 'ipc', groupFolder, 'input');
-    fs.mkdirSync(inputDir, { recursive: true });
-
-    const downloaded: DownloadedAttachment[] = [];
-
-    for (const att of attachments) {
-      try {
-        const outPath = path.join(inputDir, att.filename);
-        await this.callGog([
-          'gmail', 'attachment', att.messageId, att.attachmentId,
-          '--account', EMAIL_INTAKE_ACCOUNT,
-          '--out', inputDir,
-          '--name', att.filename,
-        ]);
-
-        // Verify the file was actually written
-        if (fs.existsSync(outPath)) {
-          downloaded.push({
-            filename: att.filename,
-            hostPath: outPath,
-            containerPath: `/workspace/ipc/input/${att.filename}`,
-            mimeType: att.mimeType,
-            size: att.size,
-          });
-          logger.info(
-            { filename: att.filename, size: att.size, path: outPath },
-            'Email channel: downloaded attachment',
-          );
-        } else {
-          logger.warn(
-            { filename: att.filename, messageId: att.messageId },
-            'Email channel: attachment download produced no file',
-          );
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error(
-          { filename: att.filename, messageId: att.messageId, error: msg },
-          'Email channel: failed to download attachment',
-        );
-      }
-    }
-
-    logger.info(
-      { total: attachments.length, downloaded: downloaded.length },
-      'Email channel: attachment download complete',
-    );
-
-    return downloaded;
-  }
-
-  // --- Classification ---
-
-  private classifyEmail(bodyText: string): 'bookmark' | 'agent' {
-    const urls = extractUrls(bodyText);
-    if (urls.length === 0) return 'agent';
-
-    // Strip URLs from text
-    let textOnly = bodyText.replace(/https?:\/\/[^\s<>"')\]},;]+/gi, '');
-
-    // Strip forwarding artifacts
-    textOnly = textOnly
-      .replace(/^>+\s?/gm, '') // quoted text markers
-      .replace(/^-{5,}\s*Forwarded message\s*-{5,}/gim, '')
-      .replace(/^(From|To|Cc|Subject|Date|Sent):.*$/gim, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return textOnly.length < URL_ONLY_TEXT_THRESHOLD ? 'bookmark' : 'agent';
-  }
-
-  // --- Helpers ---
 
   private async ensureLabel(): Promise<void> {
     try {
@@ -606,26 +757,7 @@ export class EmailChannel implements Channel {
   }
 }
 
-// --- Shared helpers (extracted from email-intake.ts) ---
-
-function extractUrls(text: string): string[] {
-  const urlRegex = /https?:\/\/[^\s<>"')\]},;]+/gi;
-  const matches = text.match(urlRegex) || [];
-
-  const seen = new Set<string>();
-  const results: string[] = [];
-
-  for (let url of matches) {
-    url = url.replace(/[.)>,;:!?]+$/, '');
-    if (url.length < MIN_URL_LENGTH) continue;
-    if (REJECT_PATTERNS.some((p) => p.test(url))) continue;
-    if (seen.has(url)) continue;
-    seen.add(url);
-    results.push(url);
-  }
-
-  return results;
-}
+// --- Shared helpers (preserved from v1) ---
 
 function decodeBase64Url(data: string): string {
   const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
@@ -633,22 +765,16 @@ function decodeBase64Url(data: string): string {
 }
 
 function extractBodyText(detail: GogMessageDetail): string {
-  // Try top-level body (gog sometimes returns decoded body directly)
   if (detail.body) return detail.body;
-
-  // Try payload body
   if (detail.payload?.body?.data) {
     return decodeBase64Url(detail.payload.body.data);
   }
-
-  // Try payload parts (multipart emails)
   if (detail.payload?.parts) {
     for (const part of detail.payload.parts) {
       if (part.mimeType === 'text/plain' && part.body?.data) {
         return decodeBase64Url(part.body.data);
       }
     }
-    // Try nested parts (e.g., multipart/alternative inside multipart/mixed)
     for (const part of detail.payload.parts) {
       if (part.parts) {
         for (const subpart of part.parts) {
@@ -658,33 +784,11 @@ function extractBodyText(detail: GogMessageDetail): string {
         }
       }
     }
-    // Fall back to text/html if no plain text
     for (const part of detail.payload.parts) {
       if (part.mimeType === 'text/html' && part.body?.data) {
         return decodeBase64Url(part.body.data);
       }
     }
   }
-
   return detail.snippet || '';
-}
-
-async function bookmarkViaRelay(url: string, tags?: string[]): Promise<boolean> {
-  try {
-    const resp = await fetch(`${BOOKMARK_RELAY_URL}/intake`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, hint: "reference", ...(tags && tags.length > 0 ? { tags } : {}) }),
-      signal: AbortSignal.timeout(RELAY_TIMEOUT),
-    });
-    const result = (await resp.json()) as Record<string, unknown>;
-    if (result.error) {
-      logger.warn({ url, error: result.error }, 'Bookmark relay returned error');
-    }
-    return true;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.error({ url, error: msg }, 'Bookmark relay unreachable');
-    return false;
-  }
 }
