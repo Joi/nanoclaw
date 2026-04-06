@@ -32,6 +32,8 @@ const envConfig = readEnvFile([
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
   'CONFIDENTIAL_ROOT',
+  'EMAIL_CHANNEL_ENABLED',
+  'EMAIL_INTAKE_ACCOUNT',
 ]);
 
 export const ASSISTANT_NAME =
@@ -144,7 +146,7 @@ export const TIMEZONE = resolveConfigTimezone();
 export const EMAIL_INTAKE_ENABLED =
   (process.env.EMAIL_INTAKE_ENABLED || '') === 'true';
 export const EMAIL_INTAKE_ACCOUNT =
-  process.env.EMAIL_INTAKE_ACCOUNT || '';
+  process.env.EMAIL_INTAKE_ACCOUNT || envConfig.EMAIL_INTAKE_ACCOUNT || '';
 export const EMAIL_INTAKE_FROM_FILTER =
   process.env.EMAIL_INTAKE_FROM_FILTER || '';
 export const EMAIL_INTAKE_POLL_INTERVAL = parseInt(
@@ -154,7 +156,7 @@ export const EMAIL_INTAKE_POLL_INTERVAL = parseInt(
 
 // Email channel v2 configuration
 export const EMAIL_CHANNEL_ENABLED =
-  (process.env.EMAIL_CHANNEL_ENABLED || '') === 'true';
+  (process.env.EMAIL_CHANNEL_ENABLED || envConfig.EMAIL_CHANNEL_ENABLED || '') === 'true';
 export const EMAIL_CHANNEL_POLL_INTERVAL = parseInt(
   process.env.EMAIL_CHANNEL_POLL_INTERVAL || '120000',
   10,
