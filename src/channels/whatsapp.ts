@@ -93,6 +93,9 @@ export class WhatsAppChannel implements Channel {
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
+        // Unblock startup so other channels can initialize while WA retries
+        if (onFirstOpen) { onFirstOpen(); onFirstOpen = undefined; }
+
         if (shouldReconnect) {
           logger.info('Reconnecting...');
           this.connectInternal().catch((err) => {
