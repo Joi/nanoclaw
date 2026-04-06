@@ -151,6 +151,29 @@ export const EMAIL_INTAKE_POLL_INTERVAL = parseInt(
   process.env.EMAIL_INTAKE_POLL_INTERVAL || '300000',
   10,
 ); // 5 min default
+
+// Email channel v2 configuration
+export const EMAIL_CHANNEL_ENABLED =
+  (process.env.EMAIL_CHANNEL_ENABLED || '') === 'true';
+export const EMAIL_CHANNEL_POLL_INTERVAL = parseInt(
+  process.env.EMAIL_CHANNEL_POLL_INTERVAL || '120000',
+  10,
+); // 2 min default
+export const EMAIL_ALIAS_MAP_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'email-alias-map.json',
+);
+export const EMAIL_IDENTITY_INDEX_PATH = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'identity-index.json',
+);
+// Calendar ID for event creation (Joi's calendar, shared as writer to jibot)
+export const EMAIL_CALENDAR_ID =
+  process.env.EMAIL_CALENDAR_ID || 'joi@ito.com';
 export const GOG_BIN = process.env.GOG_BIN || 'gog';
 export const GOG_KEYRING_PASSWORD =
   process.env.GOG_KEYRING_PASSWORD || '';
