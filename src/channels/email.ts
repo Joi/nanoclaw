@@ -33,6 +33,7 @@ import { EmailIdentityResolver, IdentityResult } from '../email-identity-resolve
 import { resolveEmailIntent, IntentResult } from '../email-intent-resolver.js';
 import { checkEmailPolicy } from '../email-policy-adapter.js';
 import { createEmailReceipt } from '../email-receipt.js';
+import { resolveReceiptDir } from '../workstream-routing.js';
 import { ReminderAdapter } from '../email-reminder-adapter.js';
 import { sanitizeReplyRecipients } from '../email-reply-sanitizer.js';
 import { EmailThreadSessionStore } from '../email-thread-session.js';
@@ -238,6 +239,7 @@ export class EmailChannel implements Channel {
       'gmail', 'send',
       '--account', EMAIL_INTAKE_ACCOUNT,
       '--reply-to-message-id', messageId,
+      '--quote',
       '--to', recipients.join(','),
       '--subject', `Re: ${subject}`,
       '--body-file', '-',
@@ -506,7 +508,7 @@ export class EmailChannel implements Channel {
 
     // Create receipt artifact
     createEmailReceipt(
-      path.join(CONFIDENTIAL_ROOT, 'email-receipts'),
+      resolveReceiptDir(CONFIDENTIAL_ROOT, subject),
       {
         type: 'action',
         senderEmail,
@@ -542,7 +544,7 @@ export class EmailChannel implements Channel {
 
     // Create intake receipt
     const receiptPath = createEmailReceipt(
-      path.join(CONFIDENTIAL_ROOT, 'email-receipts'),
+      resolveReceiptDir(CONFIDENTIAL_ROOT, subject),
       {
         type: 'intake',
         senderEmail,
