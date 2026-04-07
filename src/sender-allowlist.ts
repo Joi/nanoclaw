@@ -196,6 +196,7 @@ export function getUserWorkstreams(
   cfg: SenderAllowlistConfig,
 ): ResolvedWorkstream[] {
   if (!cfg.workstreams) return [];
+  if (!Array.isArray(user?.workstreams)) return [];
 
   const results: ResolvedWorkstream[] = [];
   for (const name of user.workstreams) {

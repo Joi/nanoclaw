@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   getUserWorkstreams,
-  ResolvedWorkstream,
   AllowlistUser,
   isSenderAllowed,
   isTriggerAllowed,
@@ -438,5 +437,32 @@ describe(getUserWorkstreams, () => {
     const result = getUserWorkstreams(userWithNonexistent, cfg);
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe('sankosh');
+  });
+
+  it("returns empty array when user.workstreams is malformed (null/undefined/non-array)", () => {
+    const cfg = cfgWithWorkstreams();
+    const malformedNull = {
+      tier: "staff" as const,
+      emails: ["karma@example.com"],
+      jids: ["slack:sankosh:U002"],
+      workstreams: null as unknown as string[],
+    };
+    expect(getUserWorkstreams(malformedNull, cfg)).toEqual([]);
+
+    const malformedUndefined = {
+      tier: "staff" as const,
+      emails: ["karma@example.com"],
+      jids: ["slack:sankosh:U002"],
+      workstreams: undefined as unknown as string[],
+    };
+    expect(getUserWorkstreams(malformedUndefined, cfg)).toEqual([]);
+
+    const malformedString = {
+      tier: "staff" as const,
+      emails: ["karma@example.com"],
+      jids: ["slack:sankosh:U002"],
+      workstreams: "sankosh" as unknown as string[],
+    };
+    expect(getUserWorkstreams(malformedString, cfg)).toEqual([]);
   });
 });
