@@ -4,6 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  getGroupWorkstreams,
   getUserWorkstreams,
   AllowlistUser,
   isSenderAllowed,
@@ -464,5 +465,108 @@ describe(getUserWorkstreams, () => {
       workstreams: "sankosh" as unknown as string[],
     };
     expect(getUserWorkstreams(malformedString, cfg)).toEqual([]);
+  });
+});
+
+describe("getGroupWorkstreams", () => {
+  function cfgForGroup(): SenderAllowlistConfig {
+    return {
+      default: { allow: "*" as const, mode: "trigger" as const },
+      chats: {},
+      logDenied: false,
+      users: {
+        joi: {
+          tier: "owner" as const,
+          emails: ["joi@example.com"],
+          jids: ["sig:+819048411965"],
+          workstreams: ["sankosh", "gidc", "bhutan", "gmc"],
+        },
+        kesang: {
+          tier: "admin" as const,
+          emails: ["kesang@example.com"],
+          jids: ["slack:sankosh:U003"],
+          workstreams: ["sankosh", "gidc", "bhutan", "gmc"],
+        },
+        karma: {
+          tier: "staff" as const,
+          emails: ["karma@example.com"],
+          jids: ["slack:sankosh:U002"],
+          workstreams: ["sankosh"],
+        },
+      },
+      workstreams: {
+        sankosh: {
+          qmd_collection: "sankosh-docs",
+          drive_folder_id: "folder-sankosh-123",
+          slack_channels: ["#sankosh"],
+          mount_path: "/workstreams/sankosh",
+        },
+        gidc: {
+          qmd_collection: "gidc-docs",
+          drive_folder_id: null,
+          slack_channels: ["#gidc"],
+          mount_path: "/workstreams/gidc",
+        },
+        bhutan: {
+          qmd_collection: "bhutan-docs",
+          drive_folder_id: null,
+          slack_channels: ["#bhutan"],
+          mount_path: "/workstreams/bhutan",
+        },
+        gmc: {
+          qmd_collection: "gmc-docs",
+          drive_folder_id: null,
+          slack_channels: ["#gmc"],
+          mount_path: "/workstreams/gmc",
+        },
+      },
+    };
+  }
+
+  it("returns all 4 workstreams when two members have identical workstreams (joi + kesang)", () => {
+    const cfg = cfgForGroup();
+    const result = getGroupWorkstreams(
+      ["sig:+819048411965", "slack:sankosh:U003"],
+      cfg,
+    );
+    expect(result).toHaveLength(4);
+    const names = result.map((r) => r.name);
+    expect(names).toContain("sankosh");
+    expect(names).toContain("gidc");
+    expect(names).toContain("bhutan");
+    expect(names).toContain("gmc");
+  });
+
+  it("returns only sankosh when one member has fewer workstreams (joi + karma)", () => {
+    const cfg = cfgForGroup();
+    const result = getGroupWorkstreams(
+      ["sig:+819048411965", "slack:sankosh:U002"],
+      cfg,
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("sankosh");
+  });
+
+  it("returns empty when a member JID is unknown (U999)", () => {
+    const cfg = cfgForGroup();
+    const result = getGroupWorkstreams(
+      ["sig:+819048411965", "slack:sankosh:U999"],
+      cfg,
+    );
+    expect(result).toEqual([]);
+  });
+
+  it("returns empty for empty member list", () => {
+    const cfg = cfgForGroup();
+    const result = getGroupWorkstreams([], cfg);
+    expect(result).toEqual([]);
+  });
+
+  it("returns full workstreams for single member (karma alone → sankosh)", () => {
+    const cfg = cfgForGroup();
+    const result = getGroupWorkstreams(["slack:sankosh:U002"], cfg);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("sankosh");
+    expect(result[0].info.drive_folder_id).toBe("folder-sankosh-123");
   });
 });

@@ -207,3 +207,32 @@ export function getUserWorkstreams(
   }
   return results;
 }
+export function getGroupWorkstreams(
+  memberJids: string[],
+  cfg: SenderAllowlistConfig,
+): ResolvedWorkstream[] {
+  if (memberJids.length === 0 || !cfg.users || !cfg.workstreams) return [];
+
+  const memberWorkstreamSets: Set<string>[] = [];
+  for (const jid of memberJids) {
+    const resolved = resolveUser(jid, cfg);
+    if (!resolved) return [];
+    memberWorkstreamSets.push(new Set(resolved.user.workstreams));
+  }
+
+  let intersection = memberWorkstreamSets[0];
+  for (let i = 1; i < memberWorkstreamSets.length; i++) {
+    const nextSet = memberWorkstreamSets[i];
+    intersection = new Set([...intersection].filter((ws) => nextSet.has(ws)));
+  }
+
+  const results: ResolvedWorkstream[] = [];
+  for (const name of intersection) {
+    const info = cfg.workstreams[name];
+    if (info) {
+      results.push({ name, info });
+    }
+  }
+  return results;
+}
+
