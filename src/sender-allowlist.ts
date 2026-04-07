@@ -217,6 +217,7 @@ export function getGroupWorkstreams(
   for (const jid of memberJids) {
     const resolved = resolveUser(jid, cfg);
     if (!resolved) return [];
+    if (!Array.isArray(resolved.user.workstreams)) return [];
     memberWorkstreamSets.push(new Set(resolved.user.workstreams));
   }
 

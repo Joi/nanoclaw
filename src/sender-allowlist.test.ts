@@ -569,4 +569,16 @@ describe("getGroupWorkstreams", () => {
     expect(result[0].name).toBe("sankosh");
     expect(result[0].info.drive_folder_id).toBe("folder-sankosh-123");
   });
+  it("returns empty (does not throw) when a member has malformed non-array workstreams", () => {
+    const cfg = cfgForGroup();
+    // Inject a malformed workstreams value for karma (non-array) to simulate corrupt config
+    (cfg.users!["karma"] as unknown as Record<string, unknown>).workstreams = 123;
+    expect(() =>
+      getGroupWorkstreams(["slack:sankosh:U002"], cfg),
+    ).not.toThrow();
+    expect(
+      getGroupWorkstreams(["slack:sankosh:U002"], cfg),
+    ).toEqual([]);
+  });
+
 });
