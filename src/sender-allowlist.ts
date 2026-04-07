@@ -8,10 +8,26 @@ export interface ChatAllowlistEntry {
   mode: 'trigger' | 'drop' | 'allow';
 }
 
+export interface AllowlistUser {
+  tier: 'owner' | 'admin' | 'staff';
+  emails: string[];
+  jids: string[];
+  workstreams: string[];
+}
+
+export interface WorkstreamInfo {
+  qmd_collection: string;
+  drive_folder_id: string | null;
+  slack_channels: string[];
+  mount_path: string;
+}
+
 export interface SenderAllowlistConfig {
   default: ChatAllowlistEntry;
   chats: Record<string, ChatAllowlistEntry>;
   logDenied: boolean;
+  users?: Record<string, AllowlistUser>;
+  workstreams?: Record<string, WorkstreamInfo>;
 }
 
 const DEFAULT_CONFIG: SenderAllowlistConfig = {
@@ -85,6 +101,8 @@ export function loadSenderAllowlist(
     default: obj.default as ChatAllowlistEntry,
     chats,
     logDenied: obj.logDenied !== false,
+    users: obj.users as Record<string, AllowlistUser> | undefined,
+    workstreams: obj.workstreams as Record<string, WorkstreamInfo> | undefined,
   };
 }
 

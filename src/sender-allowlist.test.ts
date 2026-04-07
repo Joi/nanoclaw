@@ -4,11 +4,13 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  AllowlistUser,
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
   SenderAllowlistConfig,
   shouldDropMessage,
+  WorkstreamInfo,
 } from './sender-allowlist.js';
 
 let tmpDir: string;
@@ -212,5 +214,68 @@ describe('isTriggerAllowed', () => {
     };
     isTriggerAllowed('g1', 'eve', cfg);
     // Logger.debug is called — we just verify no crash; logger is a real pino instance
+  });
+});
+
+describe('loadSenderAllowlist users and workstreams', () => {
+  it('loads users and workstreams sections from config', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      users: {
+        alice: {
+          tier: 'owner',
+          emails: ['alice@example.com'],
+          jids: ['alice@s.whatsapp.net'],
+          workstreams: ['ws1'],
+        },
+      },
+      workstreams: {
+        ws1: {
+          qmd_collection: 'docs',
+          drive_folder_id: 'folder123',
+          slack_channels: ['#general'],
+          mount_path: '/ws1',
+        },
+      },
+    });
+    const cfg = loadSenderAllowlist(p);
+    const alice = cfg.users?.['alice'] as AllowlistUser;
+    expect(alice.tier).toBe('owner');
+    expect(alice.emails).toEqual(['alice@example.com']);
+    expect(alice.jids).toEqual(['alice@s.whatsapp.net']);
+    expect(alice.workstreams).toEqual(['ws1']);
+    const ws1 = cfg.workstreams?.['ws1'] as WorkstreamInfo;
+    expect(ws1.qmd_collection).toBe('docs');
+    expect(ws1.drive_folder_id).toBe('folder123');
+    expect(ws1.slack_channels).toEqual(['#general']);
+    expect(ws1.mount_path).toBe('/ws1');
+  });
+
+  it('drive_folder_id can be null', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      workstreams: {
+        ws2: {
+          qmd_collection: 'notes',
+          drive_folder_id: null,
+          slack_channels: [],
+          mount_path: '/ws2',
+        },
+      },
+    });
+    const cfg = loadSenderAllowlist(p);
+    expect(cfg.workstreams?.['ws2'].drive_folder_id).toBeNull();
+  });
+
+  it('cfg.users and cfg.workstreams are undefined when not in config (backward compat)', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+    });
+    const cfg = loadSenderAllowlist(p);
+    expect(cfg.users).toBeUndefined();
+    expect(cfg.workstreams).toBeUndefined();
   });
 });
