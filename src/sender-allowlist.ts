@@ -185,3 +185,24 @@ export function resolveUser(
   }
   return null;
 }
+
+export interface ResolvedWorkstream {
+  name: string;
+  info: WorkstreamInfo;
+}
+
+export function getUserWorkstreams(
+  user: AllowlistUser,
+  cfg: SenderAllowlistConfig,
+): ResolvedWorkstream[] {
+  if (!cfg.workstreams) return [];
+
+  const results: ResolvedWorkstream[] = [];
+  for (const name of user.workstreams) {
+    const info = cfg.workstreams[name];
+    if (info) {
+      results.push({ name, info });
+    }
+  }
+  return results;
+}

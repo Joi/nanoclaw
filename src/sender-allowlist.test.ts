@@ -4,6 +4,8 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  getUserWorkstreams,
+  ResolvedWorkstream,
   AllowlistUser,
   isSenderAllowed,
   isTriggerAllowed,
@@ -373,5 +375,68 @@ describe('resolveUser', () => {
     expect(() => resolveUser('sig:+819048411965', cfg as SenderAllowlistConfig)).not.toThrow();
     const result = resolveUser('sig:+819048411965', cfg as SenderAllowlistConfig);
     expect(result?.name).toBe('joi');
+  });
+});
+
+describe(getUserWorkstreams, () => {
+  function cfgWithWorkstreams(): SenderAllowlistConfig {
+    return {
+      default: { allow: '*' as const, mode: 'trigger' as const },
+      chats: {},
+      logDenied: false,
+      users: {
+        karma: {
+          tier: 'staff' as const,
+          emails: ['karma@example.com'],
+          jids: ['slack:sankosh:U002'],
+          workstreams: ['sankosh'],
+        },
+      },
+      workstreams: {
+        sankosh: {
+          qmd_collection: 'sankosh-docs',
+          drive_folder_id: 'folder-sankosh-123',
+          slack_channels: ['#sankosh'],
+          mount_path: '/workstreams/sankosh',
+        },
+        gidc: {
+          qmd_collection: 'gidc-docs',
+          drive_folder_id: null,
+          slack_channels: ['#gidc'],
+          mount_path: '/workstreams/gidc',
+        },
+      },
+    };
+  }
+
+  it('returns workstream info for user with one workstream', () => {
+    const cfg = cfgWithWorkstreams();
+    const user = cfg.users!['karma'];
+    const result = getUserWorkstreams(user, cfg);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('sankosh');
+    expect(result[0].info.qmd_collection).toBe('sankosh-docs');
+    expect(result[0].info.drive_folder_id).toBe('folder-sankosh-123');
+  });
+
+  it('returns empty array when workstreams section missing from config', () => {
+    const cfg = cfgWithWorkstreams();
+    const user = cfg.users!['karma'];
+    const cfgWithoutWorkstreams: SenderAllowlistConfig = { ...cfg, workstreams: undefined };
+    const result = getUserWorkstreams(user, cfgWithoutWorkstreams);
+    expect(result).toEqual([]);
+  });
+
+  it('skips workstreams not defined in workstreams section', () => {
+    const cfg = cfgWithWorkstreams();
+    const userWithNonexistent: AllowlistUser = {
+      tier: 'staff' as const,
+      emails: ['karma@example.com'],
+      jids: ['slack:sankosh:U002'],
+      workstreams: ['sankosh', 'nonexistent'],
+    };
+    const result = getUserWorkstreams(userWithNonexistent, cfg);
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('sankosh');
   });
 });
