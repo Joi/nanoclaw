@@ -86,6 +86,7 @@ import {
   stopRemoteControl,
 } from './remote-control.js';
 import {
+  computePermittedScope,
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -453,6 +454,16 @@ async function runAgent(
       }
     : undefined;
 
+  const allowlistCfg = loadSenderAllowlist();
+  const scope = computePermittedScope(chatJid, chatJid, allowlistCfg);
+  const extraEnv: Record<string, string> = {};
+  if (scope) {
+    extraEnv.PERMITTED_WORKSTREAMS = scope.workstreams;
+    extraEnv.PERMITTED_QMD_COLLECTIONS = scope.qmdCollections;
+    extraEnv.PERMITTED_MOUNT_PATHS = scope.mountPaths;
+    extraEnv.PERMITTED_WORKSTREAM_NAMES = scope.workstreamNames;
+  }
+
   try {
     const output = await runContainerAgent(
       group,
@@ -464,6 +475,7 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
         qmdPorts: getQmdPorts(chatJid, channelConfigs),
+        extraEnv: Object.keys(extraEnv).length > 0 ? extraEnv : undefined,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
