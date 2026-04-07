@@ -47,6 +47,7 @@ export interface ContainerInput {
   bookmarksAccess?: boolean;
   emailAccess?: boolean;
   qmdPorts?: Record<string, number>;
+  extraEnv?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -277,6 +278,7 @@ async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentIdentifier?: string,
+  extraEnv?: Record<string, string>,
 ): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -313,6 +315,12 @@ async function buildContainerArgs(
     }
   }
 
+  if (extraEnv) {
+    for (const [key, value] of Object.entries(extraEnv)) {
+      args.push('-e', `${key}=${value}`);
+    }
+  }
+
   args.push(CONTAINER_IMAGE);
 
   return args;
@@ -340,6 +348,7 @@ export async function runContainerAgent(
     mounts,
     containerName,
     agentIdentifier,
+    input.extraEnv,
   );
 
   logger.debug(

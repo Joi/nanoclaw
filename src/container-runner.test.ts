@@ -356,3 +356,78 @@ describe("container-runner settings.json QMD MCP configuration", () => {
     expect(settingsCalls).toHaveLength(0);
   });
 });
+
+import { spawn } from 'child_process';
+
+describe('container-runner extraEnv injection', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('includes extra env vars as -e flags when extraEnv is provided', async () => {
+    const inputWithExtraEnv = {
+      ...testInput,
+      extraEnv: { PERMITTED_WORKSTREAMS: 'sankosh' },
+    };
+
+    runContainerAgent(testGroup, inputWithExtraEnv, () => {});
+
+    // Wait for buildContainerArgs (async) to resolve, then spawn to be called
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const idx = spawnArgs.indexOf('PERMITTED_WORKSTREAMS=sankosh');
+    expect(idx).toBeGreaterThan(-1);
+    expect(spawnArgs[idx - 1]).toBe('-e');
+  });
+
+  it('does not add extra -e flags when extraEnv is not provided', async () => {
+    runContainerAgent(testGroup, testInput, () => {});
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    // Standard env vars should be present; no custom extras
+    expect(spawnArgs.some((arg) => arg.startsWith('TZ='))).toBe(true);
+    expect(spawnArgs).not.toContain('PERMITTED_WORKSTREAMS=sankosh');
+    // Only known env var values present (no unexpected -e values)
+    const envValues = spawnArgs.filter((_, i) => i > 0 && spawnArgs[i - 1] === '-e');
+    const knownPrefixes = ['TZ=', 'ANTHROPIC_', 'HOME='];
+    for (const val of envValues) {
+      expect(knownPrefixes.some((p) => val.startsWith(p))).toBe(true);
+    }
+  });
+
+  it('includes all env vars when extraEnv has multiple entries', async () => {
+    const inputWithMultipleEnv = {
+      ...testInput,
+      extraEnv: {
+        PERMITTED_WORKSTREAMS: 'sankosh,founder-mode',
+        WORKSTREAM_MODE: 'strict',
+      },
+    };
+
+    runContainerAgent(testGroup, inputWithMultipleEnv, () => {});
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+
+    const wsIdx = spawnArgs.indexOf('PERMITTED_WORKSTREAMS=sankosh,founder-mode');
+    expect(wsIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[wsIdx - 1]).toBe('-e');
+
+    const modeIdx = spawnArgs.indexOf('WORKSTREAM_MODE=strict');
+    expect(modeIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[modeIdx - 1]).toBe('-e');
+  });
+});
