@@ -4,7 +4,7 @@
  *
  * Compares sender-allowlist.json workstream membership against:
  *   - Actual Slack channel membership (via Slack API)
- *   - Drive folder permissions (STUB — not yet configured)
+ *   - Drive folder permissions (via Google Drive REST API + rclone OAuth token)
  *
  * Exit codes:
  *   0 — no drift found
@@ -15,7 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { spawnSync } from 'child_process';
+import { spawnSync, execSync } from 'child_process';
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
@@ -92,6 +92,51 @@ function extractChannelId(channelJid) {
   return parts.length >= 4 && parts[2] === 'channel' ? parts[3] : null;
 }
 
+
+// ─── Google Drive helpers ─────────────────────────────────────────────────────────────
+
+const DRIVE_SA_EXCLUDE = 'gidc-drive-publisher@gidc-knowledge.iam.gserviceaccount.com';
+
+/** Get a fresh Drive access token by refreshing via rclone OAuth credentials. */
+async function getRcloneToken() {
+  const dump  = JSON.parse(execSync('rclone config dump', { encoding: 'utf-8' }));
+  const drive = dump['gidc-drive'];
+  if (!drive) throw new Error('rclone remote "gidc-drive" not found');
+
+  const tokenData    = JSON.parse(drive.token);
+  const clientId     = drive.client_id;
+  const clientSecret = drive.client_secret || '';
+
+  const params = new URLSearchParams({
+    client_id:     clientId,
+    client_secret: clientSecret,
+    refresh_token: tokenData.refresh_token,
+    grant_type:    'refresh_token',
+  });
+
+  const resp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    body:   params,
+  });
+  const data = await resp.json();
+  if (!data.access_token) throw new Error(`Token refresh failed: ${JSON.stringify(data)}`);
+  return data.access_token;
+}
+
+/** Fetch Drive folder permissions from the API. Returns null on API error. */
+async function getDrivePermissions(folderId, accessToken) {
+  const url  = `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?fields=permissions(emailAddress,role,type,displayName)`;
+  const resp = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!resp.ok) {
+    console.warn(`  Drive API error: ${resp.status} ${resp.statusText}`);
+    return null;
+  }
+  const data = await resp.json();
+  return data.permissions || [];
+}
+
 // ─── Date helper ─────────────────────────────────────────────────────────────
 
 function todayStr() {
@@ -117,6 +162,15 @@ async function main() {
   // Load allowlist
   const allowlist = JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf8'));
   const { users, workstreams } = allowlist;
+
+  // Get rclone Drive token once (used for all workstreams with Drive configured)
+  let driveAccessToken = null;
+  try {
+    driveAccessToken = await getRcloneToken();
+    console.log('Drive token: OK');
+  } catch (err) {
+    console.warn(`WARNING: Could not get rclone Drive token: ${err.message}`);
+  }
 
   // Ensure audit directory exists
   fs.mkdirSync(AUDIT_DIR, { recursive: true });
@@ -211,18 +265,73 @@ async function main() {
       }
     }
 
-    // Drive stub
+    // Drive permission check
+    let wsDriveOk                = null;
+    let wsDriveOverPermissioned  = [];
+    let wsDriveUnderPermissioned = [];
+    let driveStatus              = null;
+
     if (hasDrive) {
-      console.log(`  Drive folder: check not configured`);
+      if (!driveAccessToken) {
+        console.log(`  Drive folder ${wsDef.drive_folder_id}: token not available, skipping`);
+        driveStatus = 'token_unavailable';
+      } else {
+        const actualPerms = await getDrivePermissions(wsDef.drive_folder_id, driveAccessToken);
+        if (!actualPerms) {
+          driveStatus = 'api_error';
+        } else {
+          // Filter to real user accounts, excluding the service account
+          const driveUsers    = actualPerms.filter(p => p.type === 'user' && p.emailAddress !== DRIVE_SA_EXCLUDE);
+          const driveEmailSet = new Set(driveUsers.map(p => p.emailAddress.toLowerCase()));
+
+          // Expected users for this workstream with their email lists
+          const expectedUsersWithEmails = Object.entries(users)
+            .filter(([, u]) => (u.workstreams || []).includes(wsName))
+            .map(([username, u]) => ({
+              username,
+              emails: (u.emails || []).map(e => e.toLowerCase()),
+            }));
+
+          // Over-permissioned: in allowlist but NONE of their emails appear in Drive
+          wsDriveOverPermissioned = expectedUsersWithEmails
+            .filter(u => u.emails.length > 0 && !u.emails.some(e => driveEmailSet.has(e)))
+            .map(u => ({ user: u.username, reason: 'in allowlist but not in Drive permissions' }));
+
+          // Under-permissioned: Drive email not matching any allowlist user
+          const allExpectedEmails = new Set(expectedUsersWithEmails.flatMap(u => u.emails));
+          wsDriveUnderPermissioned = driveUsers
+            .filter(p => !allExpectedEmails.has(p.emailAddress.toLowerCase()))
+            .map(p => ({ email: p.emailAddress, role: p.role, reason: 'in Drive but not in allowlist' }));
+
+          const driveDrift = wsDriveOverPermissioned.length + wsDriveUnderPermissioned.length;
+          totalDrift      += driveDrift;
+          wsDriveOk        = driveDrift === 0;
+          driveStatus      = 'checked';
+
+          if (driveDrift === 0) {
+            console.log(`  Drive folder ${wsDef.drive_folder_id}: OK (${driveUsers.length} user permissions match)`);
+          } else {
+            console.log(`  Drive folder ${wsDef.drive_folder_id}: DRIFT`);
+            for (const o of wsDriveOverPermissioned) {
+              console.log(`    Over-permissioned: ${o.user} (in allowlist but not in Drive)`);
+            }
+            for (const u of wsDriveUnderPermissioned) {
+              console.log(`    Under-permissioned: ${u.email} [${u.role}] (in Drive but not in allowlist)`);
+            }
+          }
+        }
+      }
     }
 
     report.checks[wsName] = {
-      slack_channel:     firstChannelId,
-      slack_ok:          wsSlackOk,
-      drive_ok:          null,
-      over_permissioned:  wsOverPermissioned,
-      under_permissioned: wsUnderPermissioned,
-      drive_status:      hasDrive ? 'not_configured' : null,
+      slack_channel:            firstChannelId,
+      slack_ok:                 wsSlackOk,
+      drive_ok:                 wsDriveOk,
+      over_permissioned:        wsOverPermissioned,
+      under_permissioned:       wsUnderPermissioned,
+      drive_over_permissioned:  wsDriveOverPermissioned,
+      drive_under_permissioned: wsDriveUnderPermissioned,
+      drive_status:             driveStatus,
     };
   }
 
