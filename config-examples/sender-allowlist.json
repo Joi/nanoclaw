@@ -4,10 +4,68 @@
     "mode": "drop"
   },
   "chats": {
-    "slack:gidc:channel:PLACEHOLDER_SANKOSH": {
+    "slack:workspace:channel:PLACEHOLDER_CHANNEL_ID": {
       "allow": "*",
       "mode": "trigger"
+    },
+    "slack:workspace:PLACEHOLDER_USER_ID": {
+      "allow": "*",
+      "mode": "allow"
     }
   },
-  "logDenied": true
+  "logDenied": true,
+  "users": {
+    "alice": {
+      "tier": "owner",
+      "emails": [
+        "alice@example.com"
+      ],
+      "jids": [
+        "sig:+1234567890",
+        "slack:workspace:PLACEHOLDER_ALICE_ID"
+      ],
+      "workstreams": [
+        "project-a",
+        "project-b"
+      ]
+    },
+    "bob": {
+      "tier": "admin",
+      "emails": [
+        "bob@example.com"
+      ],
+      "jids": [
+        "slack:workspace:PLACEHOLDER_BOB_ID"
+      ],
+      "workstreams": [
+        "project-a"
+      ]
+    },
+    "carol": {
+      "tier": "staff",
+      "emails": [],
+      "jids": [
+        "slack:workspace:PLACEHOLDER_CAROL_ID"
+      ],
+      "workstreams": [
+        "project-b"
+      ]
+    }
+  },
+  "workstreams": {
+    "project-a": {
+      "qmd_collection": "confidential-project-a",
+      "drive_folder_id": null,
+      "slack_channels": [],
+      "mount_path": "confidential/project-a/"
+    },
+    "project-b": {
+      "qmd_collection": "confidential-project-b",
+      "drive_folder_id": "PLACEHOLDER_DRIVE_FOLDER_ID",
+      "slack_channels": [
+        "slack:workspace:channel:PLACEHOLDER_CHANNEL_ID"
+      ],
+      "mount_path": "confidential/project-b/"
+    }
+  }
 }
