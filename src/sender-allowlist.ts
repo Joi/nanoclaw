@@ -177,9 +177,9 @@ export function resolveUser(
   jid: string,
   cfg: SenderAllowlistConfig,
 ): ResolvedUser | null {
-  if (cfg.users === undefined) return null;
+  if (!cfg.users || typeof cfg.users !== 'object') return null;
   for (const [name, user] of Object.entries(cfg.users)) {
-    if (user.jids.includes(jid)) {
+    if (Array.isArray(user?.jids) && user.jids.includes(jid)) {
       return { name, user };
     }
   }

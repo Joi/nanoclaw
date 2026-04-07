@@ -8,7 +8,6 @@ import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
-  ResolvedUser,
   resolveUser,
   SenderAllowlistConfig,
   shouldDropMessage,
@@ -309,12 +308,14 @@ describe('resolveUser', () => {
     const result = resolveUser('sig:+819048411965', cfgWithUsers());
     expect(result).not.toBeNull();
     expect(result?.name).toBe('joi');
+    expect(result?.user.tier).toBe('owner');
   });
 
   it('resolves user by Slack JID', () => {
     const result = resolveUser('slack:sankosh:U002', cfgWithUsers());
     expect(result).not.toBeNull();
     expect(result?.name).toBe('karma');
+    expect(result?.user.tier).toBe('staff');
   });
 
   it('resolves same user from different JIDs', () => {
@@ -338,5 +339,39 @@ describe('resolveUser', () => {
     };
     const result = resolveUser('sig:+819048411965', cfg);
     expect(result).toBeNull();
+  });
+  it('returns null when users is null (malformed config)', () => {
+    const cfg = {
+      default: { allow: '*' as const, mode: 'trigger' as const },
+      chats: {},
+      logDenied: false,
+      users: null as unknown as Record<string, AllowlistUser>,
+    };
+    expect(resolveUser('sig:+819048411965', cfg as SenderAllowlistConfig)).toBeNull();
+  });
+
+  it('skips entries with non-array jids and returns valid match (malformed config)', () => {
+    const cfg = {
+      default: { allow: '*' as const, mode: 'trigger' as const },
+      chats: {},
+      logDenied: false,
+      users: {
+        bad: {
+          tier: 'staff' as const,
+          emails: [],
+          jids: 'not-an-array' as unknown as string[],
+          workstreams: [],
+        },
+        joi: {
+          tier: 'owner' as const,
+          emails: ['joi@example.com'],
+          jids: ['sig:+819048411965'],
+          workstreams: ['ws1'],
+        },
+      },
+    };
+    expect(() => resolveUser('sig:+819048411965', cfg as SenderAllowlistConfig)).not.toThrow();
+    const result = resolveUser('sig:+819048411965', cfg as SenderAllowlistConfig);
+    expect(result?.name).toBe('joi');
   });
 });
