@@ -675,3 +675,87 @@ describe('resolveGroupMembers', () => {
     expect(resolveGroupMembers('slack:foo:channel:C001', cfg)).toEqual([]);
   });
 });
+
+import { computePermittedScope } from './sender-allowlist.js';
+
+describe('computePermittedScope', () => {
+  function fullCfg(): SenderAllowlistConfig {
+    return {
+      default: { allow: '*' as const, mode: 'trigger' as const },
+      chats: {},
+      logDenied: true,
+      users: {
+        joi: {
+          tier: 'owner' as const,
+          emails: ['joi@ito.com'],
+          jids: ['sig:+819048411965', 'slack:gidc:U001'],
+          workstreams: ['gidc', 'sankosh', 'bhutan', 'gmc'],
+        },
+        karma: {
+          tier: 'staff' as const,
+          emails: [],
+          jids: ['slack:sankosh:U002'],
+          workstreams: ['sankosh'],
+        },
+      },
+      workstreams: {
+        gidc: { qmd_collection: 'confidential-gidc', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/gidc/' },
+        sankosh: { qmd_collection: 'confidential-sankosh', drive_folder_id: '1Tjy', slack_channels: [], mount_path: 'confidential/sankosh/' },
+        bhutan: { qmd_collection: 'confidential-bhutan', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/bhutan/' },
+        gmc: { qmd_collection: 'confidential-gmc', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/gmc/' },
+      },
+      groups: {
+        'slack:sankosh:channel:C0AMDUXLXCG': { members: ['joi', 'karma'] },
+      },
+    };
+  }
+
+  it('DM: returns full scope for owner', () => {
+    const scope = computePermittedScope('sig:+819048411965', 'sig:+819048411965', fullCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams).toBe('gidc,sankosh,bhutan,gmc');
+    expect(scope!.qmdCollections).toBe('confidential-gidc,confidential-sankosh,confidential-bhutan,confidential-gmc');
+    expect(scope!.mountPaths).toBe('confidential/gidc/,confidential/sankosh/,confidential/bhutan/,confidential/gmc/');
+    expect(scope!.workstreamNames).toBe('gidc, sankosh, bhutan, gmc');
+  });
+
+  it('DM: returns limited scope for staff', () => {
+    const scope = computePermittedScope('slack:sankosh:U002', 'slack:sankosh:U002', fullCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams).toBe('sankosh');
+    expect(scope!.qmdCollections).toBe('confidential-sankosh');
+  });
+
+  it('Group: returns intersection (owner + staff = sankosh only)', () => {
+    const scope = computePermittedScope('slack:gidc:U001', 'slack:sankosh:channel:C0AMDUXLXCG', fullCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams).toBe('sankosh');
+    expect(scope!.qmdCollections).toBe('confidential-sankosh');
+  });
+
+  it('returns null for unknown sender DM', () => {
+    expect(computePermittedScope('slack:unknown:U999', 'slack:unknown:U999', fullCfg())).toBeNull();
+  });
+
+  it('returns null when no users section', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+    };
+    expect(computePermittedScope('sig:+819048411965', 'sig:+819048411965', cfg)).toBeNull();
+  });
+
+  it('DM with sender using alternate JID', () => {
+    const scope = computePermittedScope('slack:gidc:U001', 'slack:gidc:U001', fullCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams).toBe('gidc,sankosh,bhutan,gmc');
+  });
+
+  it('unknown group JID falls back to sender DM scope', () => {
+    // chatJid is not in groups, so falls through to sender-based DM resolution
+    const scope = computePermittedScope('slack:sankosh:U002', 'slack:unknown:channel:C999', fullCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams).toBe('sankosh');
+  });
+});

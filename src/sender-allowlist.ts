@@ -272,3 +272,46 @@ export function resolveGroupMembers(
   }
   return jids;
 }
+
+/**
+ * Compute the permitted workstream scope for a message.
+ *
+ * For DMs: resolves the sender to a user, returns their workstreams.
+ * For groups: looks up group members, computes intersection of their workstreams.
+ * Returns null if sender/group can't be resolved (unknown user).
+ *
+ * @param senderJid - The JID of the message sender
+ * @param chatJid - The JID of the chat (same as senderJid for DMs, channel JID for groups)
+ * @param cfg - The loaded allowlist config
+ */
+export function computePermittedScope(
+  senderJid: string,
+  chatJid: string,
+  cfg: SenderAllowlistConfig,
+): PermittedScope | null {
+  if (!cfg.users || !cfg.workstreams) return null;
+
+  let resolved: ResolvedWorkstream[];
+
+  // Check if chatJid is a known group
+  if (cfg.groups && cfg.groups[chatJid]) {
+    // Group message — intersection of all members' workstreams
+    const memberJids = resolveGroupMembers(chatJid, cfg);
+    if (memberJids.length === 0) return null;
+    resolved = getGroupWorkstreams(memberJids, cfg);
+  } else {
+    // DM or unknown group — scope to sender's workstreams
+    const user = resolveUser(senderJid, cfg);
+    if (!user) return null;
+    resolved = getUserWorkstreams(user.user, cfg);
+  }
+
+  if (resolved.length === 0) return null;
+
+  return {
+    workstreams: resolved.map((w) => w.name).join(','),
+    qmdCollections: resolved.map((w) => w.info.qmd_collection).join(','),
+    mountPaths: resolved.map((w) => w.info.mount_path).join(','),
+    workstreamNames: resolved.map((w) => w.name).join(', '),
+  };
+}
