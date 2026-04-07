@@ -759,3 +759,88 @@ describe('computePermittedScope', () => {
     expect(scope!.workstreams).toBe('sankosh');
   });
 });
+
+describe('computePermittedScope — integration with live-like data', () => {
+  function livelikeCfg(): SenderAllowlistConfig {
+    return {
+      default: { allow: '*' as const, mode: 'drop' as const },
+      chats: {},
+      logDenied: true,
+      users: {
+        joi: {
+          tier: 'owner' as const,
+          emails: ['joi@ito.com', 'joichiito@gidc.bt'],
+          jids: ['sig:+819048411965', 'slack:gidc:U0ACGPDA50Q', 'slack:joiito:U030ERQD0'],
+          workstreams: ['gidc', 'sankosh', 'bhutan', 'gmc'],
+        },
+        kesang: {
+          tier: 'admin' as const,
+          emails: ['kesang@gidc.bt'],
+          jids: ['slack:gidc:PLACEHOLDER_KESANG'],
+          workstreams: ['gidc', 'sankosh', 'bhutan', 'gmc'],
+        },
+        karma: {
+          tier: 'staff' as const,
+          emails: [],
+          jids: ['slack:sankosh:PLACEHOLDER_KARMA'],
+          workstreams: ['sankosh'],
+        },
+        tandin: {
+          tier: 'staff' as const,
+          emails: [],
+          jids: ['slack:sankosh:PLACEHOLDER_TANDIN'],
+          workstreams: ['sankosh'],
+        },
+        ujjwal: {
+          tier: 'staff' as const,
+          emails: ['ujjwaldeepdahal@gidc.bt'],
+          jids: ['slack:sankosh:PLACEHOLDER_UJJWAL'],
+          workstreams: ['sankosh', 'bhutan'],
+        },
+      },
+      workstreams: {
+        gidc: { qmd_collection: 'confidential-gidc', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/gidc/' },
+        sankosh: { qmd_collection: 'confidential-sankosh', drive_folder_id: '1Tjy7YYABXhTHhsWqoFYG_MOVFBwVkJHy', slack_channels: ['slack:sankosh:channel:C0AMDUXLXCG'], mount_path: 'confidential/sankosh/' },
+        bhutan: { qmd_collection: 'confidential-bhutan', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/bhutan/' },
+        gmc: { qmd_collection: 'confidential-gmc', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/gmc/' },
+      },
+      groups: {
+        'slack:sankosh:channel:C0AMDUXLXCG': {
+          members: ['joi', 'kesang', 'karma', 'tandin', 'ujjwal'],
+        },
+      },
+    };
+  }
+
+  it('Joi DM gets all 4 workstreams', () => {
+    const scope = computePermittedScope('sig:+819048411965', 'sig:+819048411965', livelikeCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams.split(',').sort()).toEqual(['bhutan', 'gidc', 'gmc', 'sankosh']);
+  });
+
+  it('Karma DM gets sankosh only', () => {
+    const scope = computePermittedScope('slack:sankosh:PLACEHOLDER_KARMA', 'slack:sankosh:PLACEHOLDER_KARMA', livelikeCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams).toBe('sankosh');
+    expect(scope!.qmdCollections).toBe('confidential-sankosh');
+  });
+
+  it('Ujjwal DM gets sankosh + bhutan', () => {
+    const scope = computePermittedScope('slack:sankosh:PLACEHOLDER_UJJWAL', 'slack:sankosh:PLACEHOLDER_UJJWAL', livelikeCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams.split(',').sort()).toEqual(['bhutan', 'sankosh']);
+  });
+
+  it('sankosh-core channel: intersection is sankosh (lowest common denominator)', () => {
+    // All 5 members have sankosh. Karma/Tandin ONLY have sankosh. So intersection = sankosh.
+    const scope = computePermittedScope('slack:gidc:U0ACGPDA50Q', 'slack:sankosh:channel:C0AMDUXLXCG', livelikeCfg());
+    expect(scope).not.toBeNull();
+    expect(scope!.workstreams).toBe('sankosh');
+    expect(scope!.qmdCollections).toBe('confidential-sankosh');
+    expect(scope!.mountPaths).toBe('confidential/sankosh/');
+  });
+
+  it('unknown user returns null', () => {
+    expect(computePermittedScope('slack:unknown:U999', 'slack:unknown:U999', livelikeCfg())).toBeNull();
+  });
+});
