@@ -10,12 +10,50 @@ export interface IntakeAttachment {
 
 export interface IntakeMessage {
   author: string;
+  senderId?: string;  // stable JID like slack:gidc:U12345
   channelId: string;
   channelName: string;
   workstream: string;
   text: string;
   timestamp: string;
   attachments?: IntakeAttachment[];
+}
+
+/**
+ * Replace @Name references with [[Name]] vault wikilinks for known identities.
+ * Names are matched case-sensitively against the identity index and sorted by
+ * length descending so "Joseph Jailer-Coley" matches before "Joseph".
+ * Safe to call when the identity index is missing — returns text unchanged.
+ */
+export function wikiLinkMentions(text: string, identityIndexPath: string): string {
+  let names: string[] = [];
+  try {
+    const raw = fs.readFileSync(identityIndexPath, 'utf-8');
+    const index = JSON.parse(raw) as Record<string, { name?: string }>;
+    const nameSet = new Set<string>();
+    for (const entry of Object.values(index)) {
+      if (typeof entry.name === "string" && entry.name) nameSet.add(entry.name);
+    }
+    names = [...nameSet];
+  } catch {
+    return text; // Index unavailable — return unchanged
+  }
+
+  if (names.length === 0) return text;
+
+  // Sort by length descending so longer names match before shorter substrings
+  names.sort((a, b) => b.length - a.length);
+
+  let result = text;
+  for (const name of names) {
+    if (!name) continue;
+    // Escape regex special characters in the name
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`@${escaped}\\b`, 'g');
+    result = result.replace(regex, `[[${name}]]`);
+  }
+
+  return result;
 }
 
 /**
@@ -44,6 +82,7 @@ export function writeIntakeFile(confidentialRoot: string, msg: IntakeMessage): s
     'type: slack-intake',
     `source: "slack:gidc:channel:${msg.channelId}"`,
     `author: "${msg.author}"`,
+    ...(msg.senderId ? [`sender_id: "${msg.senderId}"`] : []),
     `date: "${msg.timestamp}"`,
     'classification: confidential',
     `workstream: "${msg.workstream}"`,
@@ -51,8 +90,12 @@ export function writeIntakeFile(confidentialRoot: string, msg: IntakeMessage): s
     '---',
   ].join('\n');
 
-  // (5) Build body: text + optional '## Attachments' section
-  let body = msg.text;
+  // (5) Build body: apply wikilink mentions then append optional attachments
+  const indexPath = path.join(
+    process.env.HOME || '/Users/jibot',
+    'switchboard', 'ops', 'jibot', 'identity-index.json',
+  );
+  let body = wikiLinkMentions(msg.text, indexPath);
 
   if (msg.attachments && msg.attachments.length > 0) {
     body += '\n\n## Attachments\n';

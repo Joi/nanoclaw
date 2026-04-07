@@ -10,6 +10,7 @@ vi.mock('fs', async () => {
       mkdirSync: vi.fn(),
       writeFileSync: vi.fn(),
       existsSync: vi.fn(() => false),
+      readFileSync: vi.fn(() => { throw new Error("ENOENT: mock"); }),
       copyFileSync: vi.fn(),
     },
   };
