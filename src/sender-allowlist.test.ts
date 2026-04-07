@@ -582,3 +582,96 @@ describe("getGroupWorkstreams", () => {
   });
 
 });
+
+// ── Phase 2: Groups + computePermittedScope ──────────────────────────
+
+import type { AllowlistGroup, PermittedScope } from './sender-allowlist.js';
+import { resolveGroupMembers } from './sender-allowlist.js';
+
+describe('AllowlistGroup schema', () => {
+  it('loads config with groups section', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+      users: {
+        joi: { tier: 'owner', emails: ['joi@ito.com'], jids: ['slack:gidc:U001'], workstreams: ['gidc', 'sankosh'] },
+        karma: { tier: 'staff', emails: [], jids: ['slack:sankosh:U002'], workstreams: ['sankosh'] },
+      },
+      workstreams: {
+        gidc: { qmd_collection: 'confidential-gidc', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/gidc/' },
+        sankosh: { qmd_collection: 'confidential-sankosh', drive_folder_id: '1Tjy', slack_channels: [], mount_path: 'confidential/sankosh/' },
+      },
+      groups: {
+        'slack:sankosh:channel:C0AMDUXLXCG': { members: ['joi', 'karma'] },
+      },
+    });
+    const cfg = loadSenderAllowlist(p);
+    expect(cfg.groups).toBeDefined();
+    expect(cfg.groups!['slack:sankosh:channel:C0AMDUXLXCG'].members).toEqual(['joi', 'karma']);
+  });
+
+  it('loads config without groups (backward compat)', () => {
+    const p = writeConfig({
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+    });
+    const cfg = loadSenderAllowlist(p);
+    expect(cfg.groups).toBeUndefined();
+  });
+});
+
+describe('resolveGroupMembers', () => {
+  function cfgWithGroups(): SenderAllowlistConfig {
+    return {
+      default: { allow: '*' as const, mode: 'trigger' as const },
+      chats: {},
+      logDenied: true,
+      users: {
+        joi: { tier: 'owner' as const, emails: ['joi@ito.com'], jids: ['sig:+819048411965', 'slack:gidc:U001'], workstreams: ['gidc', 'sankosh'] },
+        karma: { tier: 'staff' as const, emails: [], jids: ['slack:sankosh:U002'], workstreams: ['sankosh'] },
+        unknown_member: { tier: 'staff' as const, emails: [], jids: [], workstreams: ['sankosh'] },
+      },
+      workstreams: {
+        gidc: { qmd_collection: 'confidential-gidc', drive_folder_id: null, slack_channels: [], mount_path: 'confidential/gidc/' },
+        sankosh: { qmd_collection: 'confidential-sankosh', drive_folder_id: '1Tjy', slack_channels: [], mount_path: 'confidential/sankosh/' },
+      },
+      groups: {
+        'slack:sankosh:channel:C0AMDUXLXCG': { members: ['joi', 'karma'] },
+        'slack:gidc:channel:C001': { members: ['joi'] },
+        'slack:empty:channel:C999': { members: ['unknown_member'] },
+      },
+    };
+  }
+
+  it('resolves group to member JIDs', () => {
+    const jids = resolveGroupMembers('slack:sankosh:channel:C0AMDUXLXCG', cfgWithGroups());
+    expect(jids).toHaveLength(2);
+    expect(jids).toContain('sig:+819048411965');
+    expect(jids).toContain('slack:sankosh:U002');
+  });
+
+  it('resolves single-member group', () => {
+    const jids = resolveGroupMembers('slack:gidc:channel:C001', cfgWithGroups());
+    expect(jids).toEqual(['sig:+819048411965']);
+  });
+
+  it('skips members with no JIDs', () => {
+    const jids = resolveGroupMembers('slack:empty:channel:C999', cfgWithGroups());
+    expect(jids).toEqual([]);
+  });
+
+  it('returns empty for unknown group JID', () => {
+    expect(resolveGroupMembers('slack:unknown:channel:C000', cfgWithGroups())).toEqual([]);
+  });
+
+  it('returns empty when no groups section', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: true,
+    };
+    expect(resolveGroupMembers('slack:foo:channel:C001', cfg)).toEqual([]);
+  });
+});

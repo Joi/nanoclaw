@@ -22,12 +22,24 @@ export interface WorkstreamInfo {
   mount_path: string;
 }
 
+export interface AllowlistGroup {
+  members: string[];
+}
+
+export interface PermittedScope {
+  workstreams: string;
+  qmdCollections: string;
+  mountPaths: string;
+  workstreamNames: string;
+}
+
 export interface SenderAllowlistConfig {
   default: ChatAllowlistEntry;
   chats: Record<string, ChatAllowlistEntry>;
   logDenied: boolean;
   users?: Record<string, AllowlistUser>;
   workstreams?: Record<string, WorkstreamInfo>;
+  groups?: Record<string, AllowlistGroup>;
 }
 
 const DEFAULT_CONFIG: SenderAllowlistConfig = {
@@ -103,6 +115,7 @@ export function loadSenderAllowlist(
     logDenied: obj.logDenied !== false,
     users: obj.users as Record<string, AllowlistUser> | undefined,
     workstreams: obj.workstreams as Record<string, WorkstreamInfo> | undefined,
+    groups: obj.groups as Record<string, AllowlistGroup> | undefined,
   };
 }
 
@@ -237,3 +250,25 @@ export function getGroupWorkstreams(
   return results;
 }
 
+/**
+ * Resolve a group JID to the JIDs of its members.
+ * Returns member JIDs for getGroupWorkstreams(), or empty array if group not found.
+ */
+export function resolveGroupMembers(
+  groupJid: string,
+  cfg: SenderAllowlistConfig,
+): string[] {
+  if (!cfg.groups || !cfg.users) return [];
+  const group = cfg.groups[groupJid];
+  if (!group) return [];
+
+  // Map member names to their first JID
+  const jids: string[] = [];
+  for (const memberName of group.members) {
+    const user = cfg.users[memberName];
+    if (user && user.jids.length > 0) {
+      jids.push(user.jids[0]);
+    }
+  }
+  return jids;
+}
