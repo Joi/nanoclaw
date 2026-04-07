@@ -15,8 +15,9 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { spawnSync } from 'child_process';
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Config ─────────────────────────────────────────────────────────────────
 
 const BOT_USER_ID   = 'U0ANFTA9FFT'; // jibot's own Slack UID — excluded from comparisons
 const SLACK_NS      = 'gidc';         // workspace namespace for SLACK_3_BOT_TOKEN
@@ -25,7 +26,7 @@ const ALLOWLIST_PATH = path.join(os.homedir(), '.config/nanoclaw/sender-allowlis
 const AUDIT_DIR      = path.join(os.homedir(), 'nanoclaw/audit');
 const ENV_PATH       = path.join(os.homedir(), 'nanoclaw/.env');
 
-// ─── .env loader ──────────────────────────────────────────────────────────────
+// ─── .env loader ────────────────────────────────────────────────────────────
 
 function loadEnv(envPath) {
   const env = {};
@@ -40,7 +41,7 @@ function loadEnv(envPath) {
   return env;
 }
 
-// ─── Slack API helpers ────────────────────────────────────────────────────────
+// ─── Slack API helpers ───────────────────────────────────────────────────────
 
 async function slackGet(token, method, params = {}) {
   const url = new URL(`https://slack.com/api/${method}`);
@@ -67,7 +68,7 @@ async function getChannelMembers(token, channelId) {
   return members;
 }
 
-// ─── JID parsers ──────────────────────────────────────────────────────────────
+// ─── JID parsers ─────────────────────────────────────────────────────────────
 
 /**
  * Extracts a Slack user UID from a gidc-namespace JID.
@@ -91,13 +92,13 @@ function extractChannelId(channelJid) {
   return parts.length >= 4 && parts[2] === 'channel' ? parts[3] : null;
 }
 
-// ─── Date helper ──────────────────────────────────────────────────────────────
+// ─── Date helper ─────────────────────────────────────────────────────────────
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
   const today = todayStr();
@@ -241,6 +242,26 @@ async function main() {
   // Print summary
   console.log(`\nSummary: ${summaryMsg}`);
   console.log(`Report written to: ${reportPath}`);
+
+  // Alert owner via NanoClaw IPC when drift is found
+  if (report.drift_found) {
+    try {
+      const alertText =
+        `Access Audit Alert: ${totalDrift} drift issue${totalDrift !== 1 ? 's' : ''} found on ${today}. ` +
+        `See ~/nanoclaw/audit/access-audit-${today}.json`;
+      const result = spawnSync(
+        'python3',
+        [path.join(os.homedir(), 'nanoclaw/scripts/send-message.py'), 'send', 'joi', alertText],
+        { encoding: 'utf8', timeout: 15000 },
+      );
+      if (result.error) throw result.error;
+      if (result.status !== 0) throw new Error(result.stderr?.trim() || 'send-message.py exited non-zero');
+      console.log('DM alert sent to Joi via NanoClaw IPC.');
+    } catch (alertErr) {
+      console.error(`WARNING: Failed to send DM alert: ${alertErr.message}`);
+      // Don't fail the audit itself due to alert failure
+    }
+  }
 
   process.exit(totalDrift > 0 ? 1 : 0);
 }
