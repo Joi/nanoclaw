@@ -167,3 +167,21 @@ export function isTriggerAllowed(
   }
   return allowed;
 }
+
+export interface ResolvedUser {
+  name: string;
+  user: AllowlistUser;
+}
+
+export function resolveUser(
+  jid: string,
+  cfg: SenderAllowlistConfig,
+): ResolvedUser | null {
+  if (cfg.users === undefined) return null;
+  for (const [name, user] of Object.entries(cfg.users)) {
+    if (user.jids.includes(jid)) {
+      return { name, user };
+    }
+  }
+  return null;
+}

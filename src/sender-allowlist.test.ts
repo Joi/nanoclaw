@@ -8,6 +8,8 @@ import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
+  ResolvedUser,
+  resolveUser,
   SenderAllowlistConfig,
   shouldDropMessage,
   WorkstreamInfo,
@@ -277,5 +279,64 @@ describe('loadSenderAllowlist users and workstreams', () => {
     const cfg = loadSenderAllowlist(p);
     expect(cfg.users).toBeUndefined();
     expect(cfg.workstreams).toBeUndefined();
+  });
+});
+
+describe('resolveUser', () => {
+  function cfgWithUsers(): SenderAllowlistConfig {
+    return {
+      default: { allow: '*' as const, mode: 'trigger' as const },
+      chats: {},
+      logDenied: false,
+      users: {
+        joi: {
+          tier: 'owner' as const,
+          emails: ['joi@example.com'],
+          jids: ['sig:+819048411965', 'slack:sankosh:U001', 'wa:joi@s.whatsapp.net'],
+          workstreams: ['ws1', 'ws2', 'ws3', 'ws4'],
+        },
+        karma: {
+          tier: 'staff' as const,
+          emails: ['karma@example.com'],
+          jids: ['slack:sankosh:U002'],
+          workstreams: ['ws1'],
+        },
+      },
+    };
+  }
+
+  it('resolves user by Signal JID', () => {
+    const result = resolveUser('sig:+819048411965', cfgWithUsers());
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe('joi');
+  });
+
+  it('resolves user by Slack JID', () => {
+    const result = resolveUser('slack:sankosh:U002', cfgWithUsers());
+    expect(result).not.toBeNull();
+    expect(result?.name).toBe('karma');
+  });
+
+  it('resolves same user from different JIDs', () => {
+    const cfg = cfgWithUsers();
+    const fromSignal = resolveUser('sig:+819048411965', cfg);
+    const fromSlack = resolveUser('slack:sankosh:U001', cfg);
+    expect(fromSignal?.name).toBe('joi');
+    expect(fromSlack?.name).toBe('joi');
+  });
+
+  it('returns null for unknown JID', () => {
+    const result = resolveUser('unknown:xyz', cfgWithUsers());
+    expect(result).toBeNull();
+  });
+
+  it('returns null when no users section exists', () => {
+    const cfg: SenderAllowlistConfig = {
+      default: { allow: '*', mode: 'trigger' },
+      chats: {},
+      logDenied: false,
+    };
+    const result = resolveUser('sig:+819048411965', cfg);
+    expect(result).toBeNull();
   });
 });
