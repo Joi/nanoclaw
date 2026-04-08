@@ -297,6 +297,12 @@ async function buildContainerArgs(
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
+  // Security hardening
+  args.push('--security-opt', 'no-new-privileges');
+  args.push('--read-only');
+  args.push('--tmpfs', '/tmp:rw,noexec,nosuid,size=256m');
+  args.push('--tmpfs', '/home/node/.npm:rw,noexec,nosuid,size=64m');
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).

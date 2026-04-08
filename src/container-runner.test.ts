@@ -431,3 +431,56 @@ describe('container-runner extraEnv injection', () => {
     expect(spawnArgs[modeIdx - 1]).toBe('-e');
   });
 });
+
+describe('container-runner security hardening', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function getSpawnArgs(): Promise<string[]> {
+    runContainerAgent(testGroup, testInput, () => {});
+    await Promise.resolve();
+    await Promise.resolve();
+    return vi.mocked(spawn).mock.calls[0][1] as string[];
+  }
+
+  it('includes --security-opt no-new-privileges', async () => {
+    const args = await getSpawnArgs();
+    const idx = args.indexOf('no-new-privileges');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx - 1]).toBe('--security-opt');
+  });
+
+  it('includes --read-only flag', async () => {
+    const args = await getSpawnArgs();
+    expect(args).toContain('--read-only');
+  });
+
+  it('includes tmpfs mount for /tmp', async () => {
+    const args = await getSpawnArgs();
+    const idx = args.indexOf('/tmp:rw,noexec,nosuid,size=256m');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx - 1]).toBe('--tmpfs');
+  });
+
+  it('includes tmpfs mount for /home/node/.npm', async () => {
+    const args = await getSpawnArgs();
+    const idx = args.indexOf('/home/node/.npm:rw,noexec,nosuid,size=64m');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx - 1]).toBe('--tmpfs');
+  });
+
+  it('does not include seccomp=unconfined override', async () => {
+    const args = await getSpawnArgs();
+    const seccompArgs = args.filter(
+      (a) => typeof a === 'string' && a.includes('seccomp'),
+    );
+    expect(seccompArgs).toHaveLength(0);
+  });
+});
