@@ -244,3 +244,49 @@ describe('@jibot mode/scan command handling in processGroupMessages', () => {
     });
   });
 });
+
+// --- People-context enrichment wiring ---
+
+describe('People-context enrichment wiring in index.ts', () => {
+  describe('import', () => {
+    it('imports buildSenderContext from people-context.js', () => {
+      expect(indexSource).toContain("from './people-context.js'");
+      expect(indexSource).toContain('buildSenderContext');
+    });
+  });
+
+  describe('enrichment block in processGroupMessages', () => {
+    const processFn = indexSource.match(
+      /async function processGroupMessages[\s\S]*?(?=async function runAgent)/,
+    );
+
+    it('has processGroupMessages function', () => {
+      expect(processFn).not.toBeNull();
+    });
+
+    it('calls buildSenderContext after formatMessages', () => {
+      const fn = processFn![0];
+      const formatPos = fn.indexOf('formatMessages(');
+      const enrichPos = fn.indexOf('buildSenderContext(');
+      expect(formatPos).toBeGreaterThan(-1);
+      expect(enrichPos).toBeGreaterThan(-1);
+      expect(enrichPos).toBeGreaterThan(formatPos);
+    });
+
+    it('filters out is_from_me messages from sender list', () => {
+      const fn = processFn![0];
+      expect(fn).toContain('is_from_me');
+    });
+
+    it('passes enrichedPrompt to runAgent instead of raw prompt', () => {
+      const fn = processFn![0];
+      expect(fn).toContain('runAgent(group, enrichedPrompt,');
+    });
+
+    it('falls back to raw prompt when no sender context found', () => {
+      const fn = processFn![0];
+      expect(fn).toContain('senderContext\n    ? ');
+      expect(fn).toContain(': prompt');
+    });
+  });
+});

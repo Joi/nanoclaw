@@ -100,6 +100,7 @@ import { loadChannelConfigs, getQmdPorts } from './channel-config.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
+import { buildSenderContext } from './people-context.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -325,6 +326,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
+  // People-context enrichment: look up sender people pages via QMD
+  const uniqueSenders = [...new Set(
+    missedMessages
+      .filter((m) => !m.is_from_me)
+      .map((m) => m.sender_name)
+      .filter(Boolean),
+  )];
+  const senderContext = await buildSenderContext(uniqueSenders);
+  const enrichedPrompt = senderContext
+    ? `${senderContext}
+
+${prompt}`
+    : prompt;
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -355,7 +370,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, enrichedPrompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
