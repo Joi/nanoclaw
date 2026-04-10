@@ -1,203 +1,108 @@
 ---
 name: process-email
-description: On-demand email triage — fetch starred emails from joi@ito.com Gmail, classify by action type, draft replies, update ~/switchboard/email-tracker.json, and report a summary. Use when user says "process email", "check my email", "email triage", or similar.
-allowed-tools: Bash(/workspace/extra/tools/gog-run:*), Read, Write, Glob
+description: Trigger on-demand email classification via Syncthing. Writes a trigger file, waits for the desktop pipeline to run, reads the result, and replies. Use when user says "process email", "process emails", "check email", "run email pipeline".
 ---
 
-# /process-email — On-Demand Email Triage
+# Process Email
 
-Process Joi's starred Gmail emails: classify, draft selectively, update tracker, report summary.
+## What This Does
 
-## Environment Check
+Triggers the email classification pipeline on Joi's desktop via a Syncthing trigger file. The desktop runs the pipeline (fetches starred Gmail, classifies with AI, generates drafts, updates the tracker). **This machine does NOT have Gmail access** — it only writes a trigger and waits for the result.
 
-First verify the mounts are present:
+Round-trip time: ~30-60 seconds (two Syncthing hops + pipeline time).
 
-```bash
-test -f /workspace/extra/tools/gog-run && echo "gog-run: OK" || echo "ERROR: tools not mounted — restart nanoclaw after updating joi-dm containerConfig"
-test -d /workspace/extra/switchboard && echo "switchboard: OK" || echo "ERROR: switchboard not mounted"
-```
+## Steps
 
-If either fails, stop and report the missing mount to the user.
-
-### Check gog auth for joi@ito.com
+### 1. Check the ops directory is mounted
 
 ```bash
-/workspace/extra/tools/gog-run gmail search "is:starred" --account joi@ito.com --max 1 --no-input -j 2>&1
+test -d /workspace/extra/switchboard/ops || echo "ERROR: switchboard not mounted — contact jibot admin"
 ```
 
-If this returns `No auth for gmail joi@ito.com`, show the user this setup instruction and stop:
+If the directory is missing, stop and report the error.
 
-```
-⚠️ Gmail auth for joi@ito.com is not configured.
-
-To set it up, run this on jibotmac:
-
-  /Users/jibot/tools/gog-run auth add joi@ito.com --services gmail
-
-A browser will open to authorize access. After completing auth, run "process email" again.
-```
-
-## Step 1 — Fetch Starred Threads
+### 2. Write the trigger file
 
 ```bash
-/workspace/extra/tools/gog-run gmail search "is:starred" --account joi@ito.com --max 50 --no-input -j
-```
+REQUEST_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-This returns a JSON object with a `threads` array. Each thread has an `id` field. Save the list of thread IDs.
-
-## Step 2 — Load Existing Tracker
-
-```bash
-cat /workspace/extra/switchboard/email-tracker.json 2>/dev/null
-```
-
-If the file doesn't exist, start with an empty tracker:
-```json
-{"last_processed": null, "emails": []}
-```
-
-Parse the `emails` array. Each entry has a `thread_id` field.
-
-## Step 3 — Detect Cleared Stars
-
-Any email in the tracker with `status != "done"` whose `thread_id` is NOT in the current starred list has been unstarred by Joi → mark it done:
-- Set `status = "done"`
-- Set `done_at = <current ISO timestamp>`
-
-This means Joi dealt with it in Mail.app (replied, archived, unsubscribed, etc.).
-
-## Step 4 — Identify New Emails
-
-New emails are thread IDs returned by Step 1 that are NOT already in the tracker.
-
-For each new thread, fetch the full content:
-
-```bash
-/workspace/extra/tools/gog-run gmail thread get <threadId> --account joi@ito.com --full --no-input -j
-```
-
-Extract from the latest message in the thread:
-- `from` — sender name and email
-- `subject` — email subject line
-- `date` — received date (ISO format)
-- `snippet` — first 200 chars of body
-- `message_id` — the RFC 2822 `Message-ID` header value (looks like `<abc123@example.com>`)
-
-**If fetching a thread fails**, skip it and continue with the remaining threads. Note the skip in your reply.
-
-## Step 5 — Classify Each New Email
-
-For each new email, assign one category based on subject, sender, and snippet:
-
-| Category | When to use |
-|----------|-------------|
-| `auto-approve` | Routine confirmations, acceptances, simple yes/no responses where the answer is obvious from context |
-| `thoughtful-reply` | Substantive questions, proposals, requests that require real thinking or Joi's judgment |
-| `read-only` | Newsletters, FYIs, system notifications, receipts — no response needed |
-| `forward` | Things that should go to someone else on Joi's team or delegation candidates |
-| `quick-action` | Unsubscribe links, one-click forms, event RSVPs, simple approvals in external systems |
-
-Use your judgment. When in doubt between `thoughtful-reply` and `read-only`, choose `thoughtful-reply`.
-
-## Step 6 — Draft Replies for Action Categories
-
-For emails categorized as `auto-approve` or `thoughtful-reply`, generate a draft reply preview:
-
-- **auto-approve**: Write a short, direct confirmation reply (2-4 sentences). Match Joi's style: concise, warm, no unnecessary formality.
-- **thoughtful-reply**: Write a starter draft that addresses the key question or request (3-8 sentences). Flag any missing information Joi would need to complete the reply.
-- **Other categories**: Set `draft_preview` to `null`.
-
-## Step 7 — Build Mail.app Links
-
-For each email, construct the Mail.app deep link using the Message-ID header:
-
-```python
-import urllib.parse
-message_id = "<abc123@mail.example.com>"  # raw Message-ID header value
-mail_link = "message://" + urllib.parse.quote(message_id, safe="")
-```
-
-Use Python inline:
-```bash
-python3 -c "import urllib.parse; print('message://' + urllib.parse.quote('<abc123@mail.example.com>', safe=''))"
-```
-
-## Step 8 — Update Tracker
-
-Write the updated tracker to `/workspace/extra/switchboard/email-tracker.json`.
-
-Format:
-```json
+cat > /workspace/extra/switchboard/ops/email-trigger.json << EOF
 {
-  "last_processed": "2026-04-10T03:00:00Z",
-  "emails": [
-    {
-      "thread_id": "18f123abc456",
-      "message_id": "<abc123@mail.example.com>",
-      "from": "Alice Smith <alice@example.com>",
-      "subject": "Re: Q2 budget review",
-      "date": "2026-04-09T14:23:00Z",
-      "category": "thoughtful-reply",
-      "status": "pending",
-      "draft_preview": "Thanks for sending this over. A few thoughts...",
-      "mail_link": "message://%3Cabc123%40mail.example.com%3E",
-      "added_at": "2026-04-10T03:00:00Z"
-    }
-  ]
+  "action": "process",
+  "requested_at": "$TIMESTAMP",
+  "request_id": "$REQUEST_ID",
+  "status": "pending"
 }
+EOF
+
+echo "request_id=$REQUEST_ID"
 ```
 
-Merge: keep existing entries (updating cleared-star ones), add new ones at the top.
+Then send an interim message to the user:
+> "Trigger sent. Waiting for desktop pipeline (~30-60 seconds)..."
 
-Set `last_processed` to the current UTC ISO timestamp.
+Use `mcp__nanoclaw__send_message` for the interim message if available, otherwise continue to the polling step.
 
-Write with:
-```bash
-cat > /workspace/extra/switchboard/email-tracker.json << 'ENDOFJSON'
-{...}
-ENDOFJSON
-```
-
-## Step 9 — Report Summary
-
-Send a concise summary. Example format:
-
-```
-Done. 6 pending emails:
-• 2 auto-approve — quick replies ready
-• 3 thoughtful-reply — need your thinking
-• 1 read-only — no action needed
-
-2 emails marked done (star removed).
-```
-
-If there are no new emails:
-```
-No new starred emails. Tracker is up to date.
-(2 emails already pending from last run)
-```
-
-If gog auth was missing or there were errors, describe what happened instead of the summary.
-
-## Guidelines
-
-- **Don't be chatty** — the summary is the entire reply. No preamble.
-- **Process everything** — don't skip emails just because there are many. Max 50 per run.
-- **Preserve existing entries** — never drop pending emails from the tracker.
-- **Use UTC for timestamps** — always ISO 8601 with Z suffix.
-- **status flow**: `pending` → (Joi opens it) → `in-progress` → (Joi completes it) → `done`. Set new emails to `pending`. Only set `done` for cleared-star detection.
-
-## email-status (quick check)
-
-If the user says "email status" or "how many emails", just read the tracker and report without running the pipeline:
+### 3. Poll for result (up to 5 minutes)
 
 ```bash
-cat /workspace/extra/switchboard/email-tracker.json 2>/dev/null
+REQUEST_ID="<the value from step 2>"
+
+TIMEOUT=300
+INTERVAL=5
+ELAPSED=0
+
+while [ $ELAPSED -lt $TIMEOUT ]; do
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+
+    STATUS=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('/workspace/extra/switchboard/ops/email-trigger.json'))
+    if d.get('request_id') == '$REQUEST_ID':
+        print(d.get('status', 'unknown'))
+    else:
+        print('wrong_id')
+except Exception as e:
+    print('read_error')
+" 2>/dev/null)
+
+    if [ "$STATUS" = "complete" ] || [ "$STATUS" = "error" ]; then
+        break
+    fi
+done
+
+echo "final_status=$STATUS"
 ```
 
-Count pending (non-done) emails by category and report:
+### 4. Read and report the result
+
+```bash
+python3 -c "
+import json
+try:
+    d = json.load(open('/workspace/extra/switchboard/ops/email-trigger.json'))
+    status = d.get('status', 'unknown')
+    if status == 'complete':
+        print(d.get('summary', 'Pipeline completed (no summary available)'))
+    elif status == 'error':
+        print('Pipeline error: ' + d.get('error', 'unknown error'))
+    elif status == 'pending':
+        print('Pipeline did not respond within 5 minutes. Desktop may be asleep or offline.')
+    else:
+        print('Unexpected status: ' + status)
+except Exception as e:
+    print('Could not read trigger file: ' + str(e))
+"
 ```
-Email tracker: 5 pending
-• 2 auto-approve • 2 thoughtful-reply • 1 read-only
-Last processed: Apr 9 at 9:00 PM
-```
+
+Reply to the user with this output.
+
+## Important
+
+- Do NOT attempt to run gog, access Gmail, or call the Anthropic API from this machine
+- The entire email pipeline runs on the DESKTOP, not here
+- If the desktop is asleep, the trigger will sit pending until it wakes up (Syncthing syncs when it reconnects)
+- The trigger file is at `/workspace/extra/switchboard/ops/email-trigger.json` in the container
