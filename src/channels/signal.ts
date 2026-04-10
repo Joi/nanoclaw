@@ -134,6 +134,102 @@ function expandMentions(
   return result;
 }
 
+// --- Outbound mention support ---
+
+/**
+ * Build reverse lookup: lowercased name -> recipient identifier.
+ * Prefers phone number (signal-cli docs say "recipientNumber"), falls back to UUID.
+ * Also indexes unambiguous first names for convenient @FirstName matching.
+ */
+let reverseNameCache: Map<string, string> | undefined;
+
+function buildReverseNameMap(): Map<string, string> {
+  if (reverseNameCache) return reverseNameCache;
+  reverseNameCache = new Map();
+  try {
+    const dataDir = path.join(os.homedir(), '.local/share/signal-cli/data');
+    const dirs = fs.readdirSync(dataDir).filter((e: string) => e.endsWith('.d'));
+    const firstNameCount = new Map<string, number>();
+    const firstNameId = new Map<string, string>();
+
+    for (const dir of dirs) {
+      const dbPath = path.join(dataDir, dir, 'account.db');
+      if (!fs.existsSync(dbPath)) continue;
+      const db = new Database(dbPath, { readonly: true });
+      const rows = db.prepare(
+        "SELECT aci, number, TRIM(COALESCE(profile_given_name,'') || ' ' || COALESCE(profile_family_name,'')) as name FROM recipient WHERE aci IS NOT NULL AND profile_given_name IS NOT NULL"
+      ).all() as Array<{ aci: string; number: string | null; name: string }>;
+      for (const row of rows) {
+        const trimmed = row.name.trim();
+        if (!trimmed) continue;
+        const recipientId = row.number || row.aci;
+        reverseNameCache.set(trimmed.toLowerCase(), recipientId);
+
+        const firstName = trimmed.split(' ')[0].toLowerCase();
+        firstNameCount.set(firstName, (firstNameCount.get(firstName) || 0) + 1);
+        firstNameId.set(firstName, recipientId);
+      }
+      db.close();
+    }
+
+    // Add unambiguous first names (only if no full-name collision)
+    for (const [firstName, count] of firstNameCount) {
+      if (count === 1 && !reverseNameCache.has(firstName)) {
+        reverseNameCache.set(firstName, firstNameId.get(firstName)!);
+      }
+    }
+    logger.info({ entries: reverseNameCache.size }, 'Built reverse name map for outbound mentions');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to build reverse name map for mentions');
+  }
+  return reverseNameCache;
+}
+
+/** Invalidate both name caches (call when new contacts join). */
+export function invalidateNameCaches(): void {
+  profileNameCache = undefined;
+  reverseNameCache = undefined;
+}
+
+/**
+ * Scan text for @Name patterns and produce signal-cli mention entries.
+ * Returns a mentions array of "start:length:recipientId" strings.
+ * The text is NOT modified — Signal clients render mentions with their own highlighting.
+ */
+function extractMentions(text: string): { mentions: string[] } {
+  const nameMap = buildReverseNameMap();
+  if (nameMap.size === 0) return { mentions: [] };
+
+  const mentions: string[] = [];
+  const sortedNames = [...nameMap.keys()].sort((a, b) => b.length - a.length);
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== '@') continue;
+    // Skip email addresses: if preceded by a word char, it's user@domain
+    if (i > 0 && /[a-zA-Z0-9_]/.test(text[i - 1])) continue;
+
+    const rest = text.slice(i + 1).toLowerCase();
+    for (const name of sortedNames) {
+      if (!rest.startsWith(name)) continue;
+      // Ensure word boundary after the name
+      const charAfter = text[i + 1 + name.length];
+      if (charAfter && /[a-zA-Z0-9_]/.test(charAfter)) continue;
+
+      const recipientId = nameMap.get(name)!;
+      const mentionLen = 1 + name.length; // '@' + name
+      // JS string indices are UTF-16 code units — exactly what signal-cli expects
+      mentions.push(`${i}:${mentionLen}:${recipientId}`);
+      i += mentionLen - 1; // skip past this mention
+      break;
+    }
+  }
+
+  if (mentions.length > 0) {
+    logger.info({ count: mentions.length, mentions }, 'Extracted outbound Signal mentions');
+  }
+  return { mentions };
+}
+
 export class SignalChannel implements Channel {
   name = 'signal';
 
@@ -143,7 +239,7 @@ export class SignalChannel implements Channel {
   private botUuid: string = '';
   private connected = false;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private outgoingQueue: Array<{ jid: string; text: string; textStyles?: string[] }> = [];
+  private outgoingQueue: Array<{ jid: string; text: string; textStyles?: string[]; mentions?: string[] }> = [];
   private flushing = false;
   private polling = false;
   private rpcId = 0;
@@ -207,8 +303,9 @@ export class SignalChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const { text: formatted, textStyles } = markdownToSignal(text);
+    const { mentions } = extractMentions(formatted);
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text: formatted, textStyles });
+      this.outgoingQueue.push({ jid, text: formatted, textStyles, mentions });
       logger.info(
         { jid, length: text.length, queueSize: this.outgoingQueue.length },
         'Signal disconnected, message queued',
@@ -217,10 +314,10 @@ export class SignalChannel implements Channel {
     }
 
     try {
-      await this.sendViaRpc(jid, formatted, textStyles);
-      logger.info({ jid, length: formatted.length, styles: textStyles.length }, 'Signal message sent');
+      await this.sendViaRpc(jid, formatted, textStyles, mentions);
+      logger.info({ jid, length: formatted.length, styles: textStyles.length, mentions: mentions.length }, 'Signal message sent');
     } catch (err) {
-      this.outgoingQueue.push({ jid, text: formatted, textStyles });
+      this.outgoingQueue.push({ jid, text: formatted, textStyles, mentions });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send Signal message, queued',
@@ -527,7 +624,7 @@ export class SignalChannel implements Channel {
 
   // --- Sending ---
 
-  private async sendViaRpc(jid: string, text: string, textStyles?: string[]): Promise<void> {
+  private async sendViaRpc(jid: string, text: string, textStyles?: string[], mentions?: string[]): Promise<void> {
     const isGroup = jid.startsWith('sig:group:');
 
     let params: Record<string, unknown>;
@@ -552,6 +649,11 @@ export class SignalChannel implements Channel {
       params.textStyle = textStyles;
     }
 
+    // Pass mention metadata for proper Signal @-mentions (notification + highlight)
+    if (mentions && mentions.length > 0) {
+      params.mention = mentions;
+    }
+
     const result = await this.rpc<{ timestamp: number }>('send', params);
     if (result === null) {
       throw new Error(`Signal send failed for ${jid}`);
@@ -567,7 +669,7 @@ export class SignalChannel implements Channel {
       logger.info({ count: this.outgoingQueue.length }, 'Flushing Signal outgoing queue');
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
-        await this.sendViaRpc(item.jid, item.text, item.textStyles);
+        await this.sendViaRpc(item.jid, item.text, item.textStyles, item.mentions);
         logger.info({ jid: item.jid, length: item.text.length }, 'Queued Signal message sent');
       }
     } finally {
