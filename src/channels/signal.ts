@@ -192,42 +192,86 @@ export function invalidateNameCaches(): void {
 }
 
 /**
- * Scan text for @Name patterns and produce signal-cli mention entries.
- * Returns a mentions array of "start:length:recipientId" strings.
- * The text is NOT modified — Signal clients render mentions with their own highlighting.
+ * Scan text for @Name patterns, strip the '@' (Signal adds its own),
+ * and produce signal-cli mention entries.
+ *
+ * Returns modified text (with '@' removed at mention sites), adjusted
+ * textStyles, and a mentions array of "start:length:recipientId" strings.
+ *
+ * Signal's mention rendering prepends '@' to the display name, so leaving
+ * '@' in the source text causes "@@Name" in the UI.
  */
-function extractMentions(text: string): { mentions: string[] } {
+function extractMentions(
+  text: string,
+  textStyles?: string[],
+): { text: string; mentions: string[]; textStyles: string[] } {
   const nameMap = buildReverseNameMap();
-  if (nameMap.size === 0) return { mentions: [] };
+  if (nameMap.size === 0) return { text, mentions: [], textStyles: textStyles || [] };
 
-  const mentions: string[] = [];
   const sortedNames = [...nameMap.keys()].sort((a, b) => b.length - a.length);
 
+  // First pass: collect match positions (in original text coordinates)
+  const matches: Array<{ atPos: number; nameLen: number; recipientId: string }> = [];
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '@') continue;
-    // Skip email addresses: if preceded by a word char, it's user@domain
     if (i > 0 && /[a-zA-Z0-9_]/.test(text[i - 1])) continue;
 
     const rest = text.slice(i + 1).toLowerCase();
     for (const name of sortedNames) {
       if (!rest.startsWith(name)) continue;
-      // Ensure word boundary after the name
       const charAfter = text[i + 1 + name.length];
       if (charAfter && /[a-zA-Z0-9_]/.test(charAfter)) continue;
 
-      const recipientId = nameMap.get(name)!;
-      const mentionLen = 1 + name.length; // '@' + name
-      // JS string indices are UTF-16 code units — exactly what signal-cli expects
-      mentions.push(`${i}:${mentionLen}:${recipientId}`);
-      i += mentionLen - 1; // skip past this mention
+      matches.push({ atPos: i, nameLen: name.length, recipientId: nameMap.get(name)! });
+      i += name.length; // skip past (the for-loop adds 1 more)
       break;
     }
   }
 
-  if (mentions.length > 0) {
-    logger.info({ count: mentions.length, mentions }, 'Extracted outbound Signal mentions');
+  if (matches.length === 0) return { text, mentions: [], textStyles: textStyles || [] };
+
+  // Second pass: remove '@' chars at match positions (right-to-left preserves indices)
+  let newText = text;
+  const removedPositions: number[] = [];
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const pos = matches[i].atPos;
+    newText = newText.slice(0, pos) + newText.slice(pos + 1);
+    removedPositions.unshift(pos); // keep sorted ascending
   }
-  return { mentions };
+
+  // Helper: shift a position by the number of '@' chars removed before it
+  function adjust(pos: number): number {
+    let shift = 0;
+    for (const rp of removedPositions) {
+      if (rp < pos) shift++;
+      else break;
+    }
+    return pos - shift;
+  }
+
+  // Build mention entries in new-text coordinates (name only, no '@')
+  const mentions: string[] = [];
+  for (const m of matches) {
+    const start = adjust(m.atPos); // '@' was here, now the name starts here
+    mentions.push(`${start}:${m.nameLen}:${m.recipientId}`);
+  }
+
+  // Adjust textStyle positions for removed characters
+  const adjustedStyles = (textStyles || []).map((style) => {
+    const [startStr, lenStr, ...rest] = style.split(':');
+    const origStart = parseInt(startStr, 10);
+    const origLen = parseInt(lenStr, 10);
+    const newStart = adjust(origStart);
+    // Shrink length if any '@' was removed inside this style range
+    let lenShrink = 0;
+    for (const rp of removedPositions) {
+      if (rp >= origStart && rp < origStart + origLen) lenShrink++;
+    }
+    return `${newStart}:${origLen - lenShrink}:${rest.join(':')}`;
+  });
+
+  logger.info({ count: mentions.length, mentions }, 'Extracted outbound Signal mentions');
+  return { text: newText, mentions, textStyles: adjustedStyles };
 }
 
 export class SignalChannel implements Channel {
@@ -302,8 +346,8 @@ export class SignalChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const { text: formatted, textStyles } = markdownToSignal(text);
-    const { mentions } = extractMentions(formatted);
+    const { text: mdText, textStyles: mdStyles } = markdownToSignal(text);
+    const { text: formatted, mentions, textStyles } = extractMentions(mdText, mdStyles);
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: formatted, textStyles, mentions });
       logger.info(
