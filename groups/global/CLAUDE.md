@@ -83,3 +83,42 @@ Your output is rendered in Slack, which uses its own "mrkdwn" format — NOT sta
 ```
 
 Always format your responses using Slack mrkdwn, never standard markdown.
+
+## Audio/Video Transcription
+
+The `transcribe` tool converts audio and video files to text using OpenAI Whisper API (best-quality cloud transcription).
+
+### When to Use
+- When someone sends a voice message or audio file
+- When someone shares a video file and wants the audio transcribed
+- When you see `[Attached: ... (audio/... or video/...)]` in a message
+
+### How to Use
+
+```bash
+# Basic transcription (auto-detects language)
+/workspace/extra/tools/transcribe /workspace/ipc/input/<filename>
+
+# Specify language for better accuracy
+/workspace/extra/tools/transcribe /workspace/ipc/input/<filename> --language ja
+
+# Get timestamps per segment
+/workspace/extra/tools/transcribe /workspace/ipc/input/<filename> --timestamps
+
+# Save to file instead of stdout
+/workspace/extra/tools/transcribe /workspace/ipc/input/<filename> --output /tmp/transcript.txt
+
+# Guide with vocabulary prompt (helps with proper nouns)
+/workspace/extra/tools/transcribe /workspace/ipc/input/<filename> --prompt "Wikipedia, Joi Ito, Madars Virza"
+```
+
+### Supported Formats
+mp3, mp4, m4a, wav, webm, ogg, flac, mpeg, oga
+Also: mov, avi (auto-converted via ffmpeg)
+
+### Notes
+- Files under 25MB go straight to the API
+- Larger files are automatically compressed via ffmpeg before upload
+- Language is auto-detected but specifying it improves accuracy (especially for Japanese)
+- The `--prompt` flag helps Whisper recognize proper nouns and domain-specific terms
+- Audio attachments from Signal land in `/workspace/ipc/input/`
