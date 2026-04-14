@@ -134,7 +134,7 @@ export function loadChannelConfigs(
       const cid = String(parsed.channel_id);
       if (
         // Already a full JID with known prefix — use as-is
-        cid.startsWith('dc:') || cid.startsWith('tg:') ||
+        cid.startsWith("dc:") || cid.startsWith("tg:") || cid.startsWith("line:") ||
         cid.startsWith('sig:') || cid.startsWith('slack:') ||
         cid.startsWith('email:') || cid.includes('@')
       ) {
@@ -153,6 +153,9 @@ export function loadChannelConfigs(
       } else if (parsed.platform === 'telegram') {
         // Telegram uses tg:{chatId}
         jid = `tg:${cid}`;
+      } else if (parsed.platform === 'line') {
+        // LINE uses line:{groupId} or line:dm:{userId}
+        jid = `line:${cid}`;
       } else {
         // Slack and others: {platform}:{workspace}:channel:{id}
         const ns = parsed.workspace ? `${parsed.platform}:${parsed.workspace}` : parsed.platform;

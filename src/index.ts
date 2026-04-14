@@ -37,6 +37,9 @@ import {
   EMAIL_INTAKE_ACCOUNT,
   TELEGRAM_BOT_TOKEN,
   DISCORD_BOT_TOKEN,
+  LINE_CHANNEL_ACCESS_TOKEN,
+  LINE_CHANNEL_SECRET,
+  LINE_WEBHOOK_PORT,
   TELEGRAM_ONLY,
   TIMEZONE,
 } from './config.js';
@@ -51,6 +54,7 @@ import { SlackChannel } from './channels/slack.js';
 import { EmailChannel } from './channels/email.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { DiscordChannel } from './channels/discord.js';
+import { LineChannel } from './channels/line.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -1374,6 +1378,23 @@ async function main(): Promise<void> {
       logger.info('Discord channel connected');
     } catch (err) {
       logger.error({ err }, 'Failed to connect Discord channel');
+    }
+  }
+
+  // LINE channel (if configured)
+  if (LINE_CHANNEL_ACCESS_TOKEN && LINE_CHANNEL_SECRET) {
+    const line = new LineChannel(
+      LINE_CHANNEL_ACCESS_TOKEN,
+      LINE_CHANNEL_SECRET,
+      LINE_WEBHOOK_PORT,
+      channelOpts,
+    );
+    channels.push(line);
+    try {
+      await line.connect();
+      logger.info('LINE channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect LINE channel');
     }
   }
 

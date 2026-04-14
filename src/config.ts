@@ -32,6 +32,9 @@ const envConfig = readEnvFile([
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
   'DISCORD_BOT_TOKEN',
+  'LINE_CHANNEL_ACCESS_TOKEN',
+  'LINE_CHANNEL_SECRET',
+  'LINE_WEBHOOK_PORT',
   'CONFIDENTIAL_ROOT',
   'EMAIL_CHANNEL_ENABLED',
   'EMAIL_INTAKE_ACCOUNT',
@@ -67,6 +70,10 @@ export const TELEGRAM_ONLY = (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ON
 
 // Discord configuration
 export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
+
+export const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || envConfig.LINE_CHANNEL_ACCESS_TOKEN || '';
+export const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || envConfig.LINE_CHANNEL_SECRET || '';
+export const LINE_WEBHOOK_PORT = parseInt(process.env.LINE_WEBHOOK_PORT || envConfig.LINE_WEBHOOK_PORT || '10280', 10);
 
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
