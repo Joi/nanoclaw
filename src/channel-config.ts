@@ -123,12 +123,22 @@ export function loadChannelConfigs(
       // WhatsApp and Signal group JIDs are platform-native and stored in the DB as-is,
       // so we use channel_id directly as the lookup key.
       // All other platforms use the namespaced form: {platform}:{workspace}:channel:{id}.
+      // If channel_id already looks like a full JID (contains platform prefix,
+      // @-sign for WhatsApp, or sig:/dc:/tg:/email: prefix), use it directly.
+      // Otherwise construct the namespaced form: {platform}:{workspace}:channel:{id}.
       let jid: string;
-      if (parsed.platform === 'whatsapp' || parsed.platform === 'signal') {
-        jid = parsed.channel_id;
+      const cid = String(parsed.channel_id);
+      if (
+        parsed.platform === 'whatsapp' || parsed.platform === 'signal' ||
+        parsed.platform === 'email' ||
+        cid.startsWith('slack:') || cid.startsWith('dc:') || cid.startsWith('tg:') ||
+        cid.startsWith('sig:') || cid.startsWith('email:') ||
+        cid.includes('@')
+      ) {
+        jid = cid;
       } else {
         const ns = parsed.workspace ? `${parsed.platform}:${parsed.workspace}` : parsed.platform;
-        jid = `${ns}:channel:${parsed.channel_id}`;
+        jid = `${ns}:channel:${cid}`;
       }
       configs.set(jid, parsed);
 
