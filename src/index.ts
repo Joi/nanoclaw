@@ -926,7 +926,7 @@ function syncYamlToDb(): void {
     const existing = registeredGroups[jid];
     const access = getAccessFlags(jid, channelConfigs);
     const requiresTrigger = config.listening_mode !== 'active';
-    const logTriggeredOnly = config.listening_mode === 'silent';
+    const logTriggeredOnly = false; // silent mode still logs all messages for intake
 
     if (existing) {
       // Update access flags and listening-mode-derived fields from YAML
