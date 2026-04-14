@@ -28,6 +28,8 @@ export class DiscordChannel implements Channel {
   private opts: DiscordChannelOpts;
   private botToken: string;
   private botUserId: string | null = null;
+  /** Cache of displayName → userId for converting outbound @mentions back to Discord format */
+  private mentionCache = new Map<string, string>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -64,16 +66,28 @@ export class DiscordChannel implements Channel {
         ? (msg.channel as TextChannel).name || chatJid
         : senderName;
 
-      // Translate Discord <@BOT_ID> mentions into @jibot in-place.
+      // Translate ALL Discord <@USER_ID> mentions into readable @displayName in-place.
       // Discord mentions are opaque IDs like <@1234567890> that the LLM can't interpret.
-      // Replace them with the readable @name so the agent understands it's being addressed
-      // AND the trigger pattern matches naturally wherever the mention appears in the message.
-      if (this.botUserId) {
-        const mentionRe = new RegExp(`<@!?${this.botUserId}>`, 'g');
-        if (mentionRe.test(content)) {
-          content = content.replace(mentionRe, `@${ASSISTANT_NAME}`);
+      // Bot mentions become @jibot (for trigger matching); user mentions become @displayName.
+      // Build a mention cache so outbound messages can convert names back to <@ID>.
+      if (msg.mentions.users.size > 0) {
+        for (const [userId, user] of msg.mentions.users) {
+          const member = msg.guild?.members.cache.get(userId);
+          const displayName = member?.displayName || user.displayName || user.username;
+          if (userId === this.botUserId) {
+            content = content.replace(new RegExp(`<@!?${userId}>`, 'g'), `@${ASSISTANT_NAME}`);
+          } else {
+            content = content.replace(new RegExp(`<@!?${userId}>`, 'g'), `@${displayName}`);
+            this.mentionCache.set(displayName.toLowerCase(), userId);
+          }
         }
+      } else if (this.botUserId && content.includes(`<@${this.botUserId}>`)) {
+        // Fallback: no parsed mentions but raw mention syntax present (e.g., from IPC)
+        content = content.replace(new RegExp(`<@!?${this.botUserId}>`, 'g'), `@${ASSISTANT_NAME}`);
       }
+
+      // Also cache the message sender for outbound mention resolution
+      this.mentionCache.set(senderName.toLowerCase(), sender);
 
       // Store chat metadata for discovery
       this.opts.onChatMetadata(
@@ -157,6 +171,62 @@ export class DiscordChannel implements Channel {
     });
   }
 
+  /**
+   * Convert @displayName patterns in outbound text to Discord <@USER_ID> mentions.
+   * Uses the mention cache first (fast), then searches guild members (slower fallback).
+   */
+  private async resolveOutboundMentions(text: string, channel: TextChannel): Promise<string> {
+    // Find all @name patterns in the text (but not @jibot — that's us)
+    const mentionRe = /@([\w.]+)/g;
+    let match;
+    const replacements: Array<{ from: string; to: string }> = [];
+
+    while ((match = mentionRe.exec(text)) !== null) {
+      const name = match[1];
+      if (name.toLowerCase() === ASSISTANT_NAME.toLowerCase()) continue;
+
+      // Try mention cache first
+      const cachedId = this.mentionCache.get(name.toLowerCase());
+      if (cachedId) {
+        replacements.push({ from: match[0], to: `<@${cachedId}>` });
+        continue;
+      }
+
+      // Search guild members as fallback
+      if (channel.guild) {
+        try {
+          const members = await channel.guild.members.search({ query: name, limit: 1 });
+          const member = members.first();
+          if (member) {
+            this.mentionCache.set(name.toLowerCase(), member.id);
+            replacements.push({ from: match[0], to: `<@${member.id}>` });
+          }
+        } catch {
+          // Guild member search failed — leave as plain text
+        }
+      }
+    }
+
+    // Also check for bare names (without @) that match cached users
+    // Only for names that appeared as senders in this channel
+    for (const [name, userId] of this.mentionCache) {
+      if (name === ASSISTANT_NAME.toLowerCase()) continue;
+      // Look for the name at word boundaries, case-insensitive, but only if not already a mention
+      const bareRe = new RegExp(`(?<!@)\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+      if (bareRe.test(text) && !text.includes(`<@${userId}>`)) {
+        replacements.push({ from: name, to: `<@${userId}>` });
+      }
+    }
+
+    // Apply replacements (longest first to avoid partial matches)
+    replacements.sort((a, b) => b.from.length - a.from.length);
+    for (const { from, to } of replacements) {
+      text = text.replace(new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), to);
+    }
+
+    return text;
+  }
+
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.client) {
       logger.warn('Discord client not initialized');
@@ -193,6 +263,11 @@ export class DiscordChannel implements Channel {
         return;
       }
       channel = fetched as TextChannel;
+
+      // Convert @displayName mentions back to Discord <@USER_ID> format.
+      // First try the mention cache (populated from recent messages), then
+      // search the guild member list for any remaining @name patterns.
+      text = await this.resolveOutboundMentions(text, channel);
 
       // Discord has a 2000 character limit per message
       const MAX_LENGTH = 2000;
