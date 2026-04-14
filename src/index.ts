@@ -694,6 +694,11 @@ function recoverPendingMessages(): void {
       MAX_MESSAGES_PER_PROMPT,
     );
     if (pending.length > 0) {
+      // Skip groups with no channel owner to avoid clogging the GroupQueue
+      if (!findChannel(channels, chatJid)) {
+        logger.debug({ group: group.name, chatJid }, 'Recovery: skipping (no channel owner)');
+        continue;
+      }
       logger.info(
         { group: group.name, pendingCount: pending.length },
         'Recovery: found unprocessed messages',
@@ -1040,6 +1045,13 @@ async function main(): Promise<void> {
       }
 
       storeMessage(msg);
+      // Enqueue for agent processing (event-driven, supplements polling loop).
+      if (registeredGroups[chatJid]) {
+          logger.info({ chatJid }, "onMessage: enqueuing for agent processing");
+          queue.enqueueMessageCheck(chatJid);
+      } else {
+          logger.warn({ chatJid }, "onMessage: NOT enqueuing (not in registeredGroups)");
+      }
 
       // GIDC intake: write substantive messages to confidential workstream dirs
       if (
