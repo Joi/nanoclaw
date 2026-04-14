@@ -120,23 +120,41 @@ export function loadChannelConfigs(
       }
 
       // Build JID key.
-      // WhatsApp and Signal group JIDs are platform-native and stored in the DB as-is,
-      // so we use channel_id directly as the lookup key.
-      // All other platforms use the namespaced form: {platform}:{workspace}:channel:{id}.
-      // If channel_id already looks like a full JID (contains platform prefix,
-      // @-sign for WhatsApp, or sig:/dc:/tg:/email: prefix), use it directly.
-      // Otherwise construct the namespaced form: {platform}:{workspace}:channel:{id}.
+      // Each platform's channel module uses a specific JID format for inbound messages.
+      // The YAML channel_id can be either the full JID or a bare platform-native ID.
+      // If bare, we auto-construct the correct JID using the platform's format.
+      //
+      // Platform JID formats (from channel modules):
+      //   WhatsApp/Signal: platform-native JID used as-is (e.g., "120363...@g.us", "sig:group:...")
+      //   Discord: "dc:{guildId}:{channelId}" or "dc:dm:{userId}" (discord.ts L52-54)
+      //   Telegram: "tg:{chatId}" (telegram relay)
+      //   Slack: "slack:{workspace}:{userId}" (DM) or "slack:{workspace}:channel:{channelId}"
+      //   Email: "email:{address}"
       let jid: string;
       const cid = String(parsed.channel_id);
       if (
-        parsed.platform === 'whatsapp' || parsed.platform === 'signal' ||
-        parsed.platform === 'email' ||
-        cid.startsWith('slack:') || cid.startsWith('dc:') || cid.startsWith('tg:') ||
-        cid.startsWith('sig:') || cid.startsWith('email:') ||
-        cid.includes('@')
+        // Already a full JID with known prefix — use as-is
+        cid.startsWith('dc:') || cid.startsWith('tg:') ||
+        cid.startsWith('sig:') || cid.startsWith('slack:') ||
+        cid.startsWith('email:') || cid.includes('@')
       ) {
         jid = cid;
+      } else if (parsed.platform === 'whatsapp' || parsed.platform === 'signal' || parsed.platform === 'email') {
+        // These platforms use platform-native IDs directly
+        jid = cid;
+      } else if (parsed.platform === 'discord') {
+        // Discord uses dc:{guildId}:{channelId}. Workspace = guildId.
+        if (parsed.workspace) {
+          jid = `dc:${parsed.workspace}:${cid}`;
+        } else {
+          logger.warn({ file, platform: parsed.platform }, 'channel-config: Discord channel missing workspace (guild ID)');
+          jid = `dc:${cid}`;
+        }
+      } else if (parsed.platform === 'telegram') {
+        // Telegram uses tg:{chatId}
+        jid = `tg:${cid}`;
       } else {
+        // Slack and others: {platform}:{workspace}:channel:{id}
         const ns = parsed.workspace ? `${parsed.platform}:${parsed.workspace}` : parsed.platform;
         jid = `${ns}:channel:${cid}`;
       }
