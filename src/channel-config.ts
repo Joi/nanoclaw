@@ -18,24 +18,36 @@ export interface ChannelConfig {
   domains: string[];
   /**
    * How jibot engages with this channel:
-   *   active  — responds to every message (no trigger needed)
-   *   mention — responds only when @jibot is mentioned
-   *   intake  — silent listener; writes messages to confidential intake, never invokes agent
-   *
-   * Deprecated aliases still accepted in YAML (normalized on load):
-   *   attentive → mention
-   *   silent              → intake
+   *   active    — responds to every message (no trigger needed)
+   *   attentive — responds only when @jibot is mentioned, ingests all messages
+   *   silent    — never responds, never ingests (use with access.intake for filing)
    */
-  listening_mode: 'active' | 'mention' | 'intake';
+  listening_mode: 'active' | 'attentive' | 'silent';
+
   /**
-  * When true, messages are written to the confidential intake area
-  * (derived from domains[0]) regardless of listening_mode.
-  * This decouples "when does the agent respond" (listening_mode)
-  * from "where do messages get filed" (confidential_intake).
-  * Defaults to true for intake-mode channels with domains, false otherwise.
-  */
+   * Access flags (replaces DB registered_groups flags).
+   * Populated from YAML, applied to DB on startup.
+   */
+  access: {
+    reminders: boolean;
+    bookmarks: boolean;
+    email: boolean;
+    calendar: boolean;
+    file_serving: boolean;
+    intake: boolean;
+  };
+
+  /**
+   * Sender policy (replaces sender-allowlist per-chat mode).
+   *   allow   — messages pass through (default)
+   *   trigger — messages pass but sender must be on allowlist
+   *   drop    — block all messages for this channel
+   */
+  sender_policy: 'allow' | 'trigger' | 'drop';
+
+  /** Legacy field, still accepted in YAML. Use access.intake instead. */
   confidential_intake?: boolean;
-  members: Record<string, { name: string; tier: string; person_ref?: string }>;
+  members: Record<string, { tier: string; person_ref?: string }>;
 }
 
 /** Port mapping for access-tiered QMD MCP services */
@@ -83,17 +95,28 @@ export function loadChannelConfigs(
         continue;
       }
 
-      // Normalise legacy mode names → canonical 3-mode vocabulary
-      const modeRaw = String(parsed.listening_mode ?? '');
-      if (modeRaw === 'attentive') {
-        logger.warn({ file, was: modeRaw }, 'channel-config: deprecated mode, treating as "mention"');
-        parsed.listening_mode = 'mention';
-      } else if (modeRaw === 'silent') {
-        logger.warn({ file }, 'channel-config: deprecated mode "silent", treating as "intake"');
-        parsed.listening_mode = 'intake';
-      } else if (!['active', 'mention', 'intake'].includes(modeRaw)) {
-        logger.warn({ file, mode: modeRaw }, 'channel-config: unknown listening_mode, defaulting to "mention"');
-        parsed.listening_mode = 'mention';
+      // Validate listening_mode
+      const modeRaw = String(parsed.listening_mode ?? 'attentive');
+      if (!['active', 'attentive', 'silent'].includes(modeRaw)) {
+        logger.warn({ file, mode: modeRaw }, 'channel-config: unknown listening_mode, defaulting to "attentive"');
+        parsed.listening_mode = 'attentive';
+      }
+
+      // Apply access defaults
+      if (!parsed.access) {
+        parsed.access = {
+          reminders: false,
+          bookmarks: false,
+          email: false,
+          calendar: false,
+          file_serving: false,
+          intake: parsed.confidential_intake ?? (parsed.domains?.length > 0),
+        };
+      }
+
+      // Apply sender_policy default
+      if (!parsed.sender_policy) {
+        parsed.sender_policy = 'allow';
       }
 
       // Build JID key.
@@ -148,7 +171,7 @@ export function getFloorLevel(
 export function getListeningMode(
   jid: string,
   configs: Map<string, ChannelConfig>,
-): 'active' | 'mention' | 'intake' | null {
+): 'active' | 'attentive' | 'silent' | null {
   const config = configs.get(jid);
   return config?.listening_mode ?? null;
 }
@@ -200,4 +223,36 @@ export function getQmdPorts(
   }
 
   return ports;
+}
+
+
+/**
+ * Get access flags for a channel.
+ * Returns all-false defaults for unknown channels.
+ */
+export function getAccessFlags(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): ChannelConfig['access'] {
+  const config = configs.get(jid);
+  return config?.access ?? {
+    reminders: false,
+    bookmarks: false,
+    email: false,
+    calendar: false,
+    file_serving: false,
+    intake: false,
+  };
+}
+
+/**
+ * Get sender policy for a channel.
+ * Returns 'allow' for unknown channels (safe default).
+ */
+export function getSenderPolicy(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): 'allow' | 'trigger' | 'drop' {
+  const config = configs.get(jid);
+  return config?.sender_policy ?? 'allow';
 }

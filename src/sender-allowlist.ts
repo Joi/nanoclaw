@@ -1,317 +1,42 @@
-import fs from 'fs';
-
-import { SENDER_ALLOWLIST_PATH } from './config.js';
-import { logger } from './logger.js';
-
-export interface ChatAllowlistEntry {
-  allow: '*' | string[];
-  mode: 'trigger' | 'drop' | 'allow';
-}
-
-export interface AllowlistUser {
-  tier: 'owner' | 'admin' | 'staff';
-  emails: string[];
-  jids: string[];
-  workstreams: string[];
-}
-
-export interface WorkstreamInfo {
-  qmd_collection: string;
-  drive_folder_id: string | null;
-  slack_channels: string[];
-  mount_path: string;
-}
-
-export interface AllowlistGroup {
-  members: string[];
-}
-
-export interface PermittedScope {
-  workstreams: string;
-  qmdCollections: string;
-  mountPaths: string;
-  workstreamNames: string;
-}
-
-export interface SenderAllowlistConfig {
-  default: ChatAllowlistEntry;
-  chats: Record<string, ChatAllowlistEntry>;
-  logDenied: boolean;
-  users?: Record<string, AllowlistUser>;
-  workstreams?: Record<string, WorkstreamInfo>;
-  groups?: Record<string, AllowlistGroup>;
-}
-
-const DEFAULT_CONFIG: SenderAllowlistConfig = {
-  default: { allow: '*', mode: 'trigger' },
-  chats: {},
-  logDenied: true,
-};
-
-function isValidEntry(entry: unknown): entry is ChatAllowlistEntry {
-  if (!entry || typeof entry !== 'object') return false;
-  const e = entry as Record<string, unknown>;
-  const validAllow =
-    e.allow === '*' ||
-    (Array.isArray(e.allow) && e.allow.every((v) => typeof v === 'string'));
-  const validMode = e.mode === 'trigger' || e.mode === 'drop' || e.mode === 'allow';
-  return validAllow && validMode;
-}
-
-export function loadSenderAllowlist(
-  pathOverride?: string,
-): SenderAllowlistConfig {
-  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
-
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, 'utf-8');
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return DEFAULT_CONFIG;
-    logger.warn(
-      { err, path: filePath },
-      'sender-allowlist: cannot read config',
-    );
-    return DEFAULT_CONFIG;
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    logger.warn({ path: filePath }, 'sender-allowlist: invalid JSON');
-    return DEFAULT_CONFIG;
-  }
-
-  const obj = parsed as Record<string, unknown>;
-
-  if (!isValidEntry(obj.default)) {
-    logger.warn(
-      { path: filePath },
-      'sender-allowlist: invalid or missing default entry',
-    );
-    return DEFAULT_CONFIG;
-  }
-
-  const chats: Record<string, ChatAllowlistEntry> = {};
-  if (obj.chats && typeof obj.chats === 'object') {
-    for (const [jid, entry] of Object.entries(
-      obj.chats as Record<string, unknown>,
-    )) {
-      if (isValidEntry(entry)) {
-        chats[jid] = entry;
-      } else {
-        logger.warn(
-          { jid, path: filePath },
-          'sender-allowlist: skipping invalid chat entry',
-        );
-      }
-    }
-  }
-
-  return {
-    default: obj.default as ChatAllowlistEntry,
-    chats,
-    logDenied: obj.logDenied !== false,
-    users: obj.users as Record<string, AllowlistUser> | undefined,
-    workstreams: obj.workstreams as Record<string, WorkstreamInfo> | undefined,
-    groups: obj.groups as Record<string, AllowlistGroup> | undefined,
-  };
-}
-
-function getEntry(
-  chatJid: string,
-  cfg: SenderAllowlistConfig,
-): ChatAllowlistEntry {
-  return cfg.chats[chatJid] ?? cfg.default;
-}
-
-export function isSenderAllowed(
-  chatJid: string,
-  sender: string,
-  cfg: SenderAllowlistConfig,
-): boolean {
-  const entry = getEntry(chatJid, cfg);
-  if (entry.allow === '*') return true;
-  return entry.allow.includes(sender);
-}
-
-export function shouldDropMessage(
-  chatJid: string,
-  cfg: SenderAllowlistConfig,
-): boolean {
-  return getEntry(chatJid, cfg).mode === 'drop';
-}
-
-export function addAllowlistEntry(
-  chatJid: string,
-  entry: ChatAllowlistEntry,
-  pathOverride?: string,
-): void {
-  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
-  const config = loadSenderAllowlist(pathOverride);
-  config.chats[chatJid] = entry;
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2) + '\n');
-  logger.info({ chatJid }, 'sender-allowlist: entry added');
-}
-
-export function removeAllowlistEntry(
-  chatJid: string,
-  pathOverride?: string,
-): void {
-  const filePath = pathOverride ?? SENDER_ALLOWLIST_PATH;
-  const config = loadSenderAllowlist(pathOverride);
-  delete config.chats[chatJid];
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2) + '\n');
-  logger.info({ chatJid }, 'sender-allowlist: entry removed');
-}
-
-export function isTriggerAllowed(
-  chatJid: string,
-  sender: string,
-  cfg: SenderAllowlistConfig,
-): boolean {
-  const allowed = isSenderAllowed(chatJid, sender, cfg);
-  if (!allowed && cfg.logDenied) {
-    logger.debug(
-      { chatJid, sender },
-      'sender-allowlist: trigger denied for sender',
-    );
-  }
-  return allowed;
-}
-
-export interface ResolvedUser {
-  name: string;
-  user: AllowlistUser;
-}
-
-export function resolveUser(
-  jid: string,
-  cfg: SenderAllowlistConfig,
-): ResolvedUser | null {
-  if (!cfg.users || typeof cfg.users !== 'object') return null;
-  for (const [name, user] of Object.entries(cfg.users)) {
-    if (Array.isArray(user?.jids) && user.jids.includes(jid)) {
-      return { name, user };
-    }
-  }
-  return null;
-}
-
-export interface ResolvedWorkstream {
-  name: string;
-  info: WorkstreamInfo;
-}
-
-export function getUserWorkstreams(
-  user: AllowlistUser,
-  cfg: SenderAllowlistConfig,
-): ResolvedWorkstream[] {
-  if (!cfg.workstreams) return [];
-  if (!Array.isArray(user?.workstreams)) return [];
-
-  const results: ResolvedWorkstream[] = [];
-  for (const name of user.workstreams) {
-    const info = cfg.workstreams[name];
-    if (info) {
-      results.push({ name, info });
-    }
-  }
-  return results;
-}
-export function getGroupWorkstreams(
-  memberJids: string[],
-  cfg: SenderAllowlistConfig,
-): ResolvedWorkstream[] {
-  if (memberJids.length === 0 || !cfg.users || !cfg.workstreams) return [];
-
-  const memberWorkstreamSets: Set<string>[] = [];
-  for (const jid of memberJids) {
-    const resolved = resolveUser(jid, cfg);
-    if (!resolved) return [];
-    if (!Array.isArray(resolved.user.workstreams)) return [];
-    memberWorkstreamSets.push(new Set(resolved.user.workstreams));
-  }
-
-  let intersection = memberWorkstreamSets[0];
-  for (let i = 1; i < memberWorkstreamSets.length; i++) {
-    const nextSet = memberWorkstreamSets[i];
-    intersection = new Set([...intersection].filter((ws) => nextSet.has(ws)));
-  }
-
-  const results: ResolvedWorkstream[] = [];
-  for (const name of intersection) {
-    const info = cfg.workstreams[name];
-    if (info) {
-      results.push({ name, info });
-    }
-  }
-  return results;
-}
-
 /**
- * Resolve a group JID to the JIDs of its members.
- * Returns member JIDs for getGroupWorkstreams(), or empty array if group not found.
+ * DEPRECATED: This file is a backward-compatibility shim.
+ * All functionality has moved to user-identity.ts.
+ * Per-chat modes have moved to channel YAML configs (sender_policy field).
+ *
+ * This re-export allows existing imports to keep working during migration.
  */
-export function resolveGroupMembers(
-  groupJid: string,
-  cfg: SenderAllowlistConfig,
-): string[] {
-  if (!cfg.groups || !cfg.users) return [];
-  const group = cfg.groups[groupJid];
-  if (!group) return [];
+export {
+  type SenderAllowlistConfig,
+  type UserIdentityConfig,
+  type AllowlistUser,
+  type WorkstreamInfo,
+  type AllowlistGroup,
+  type PermittedScope,
+  type ResolvedUser,
+  type ResolvedWorkstream,
+  loadSenderAllowlist,
+  loadUserIdentity,
+  isSenderAllowed,
+  isTriggerAllowed,
+  resolveUser,
+  getUserWorkstreams,
+  getGroupWorkstreams,
+  resolveGroupMembers,
+  computePermittedScope,
+} from "./user-identity.js";
 
-  // Map member names to their first JID
-  const jids: string[] = [];
-  for (const memberName of group.members) {
-    const user = cfg.users[memberName];
-    if (user && user.jids.length > 0) {
-      jids.push(user.jids[0]);
-    }
-  }
-  return jids;
+// Deprecated: addAllowlistEntry/removeAllowlistEntry are no longer needed.
+// Per-chat modes now live in channel YAML configs.
+export function addAllowlistEntry(chatJid: string, entry: unknown, pathOverride?: string): void {
+  // No-op: per-chat modes moved to YAML
 }
 
-/**
- * Compute the permitted workstream scope for a message.
- *
- * For DMs: resolves the sender to a user, returns their workstreams.
- * For groups: looks up group members, computes intersection of their workstreams.
- * Returns null if sender/group can't be resolved (unknown user).
- *
- * @param senderJid - The JID of the message sender
- * @param chatJid - The JID of the chat (same as senderJid for DMs, channel JID for groups)
- * @param cfg - The loaded allowlist config
- */
-export function computePermittedScope(
-  senderJid: string,
-  chatJid: string,
-  cfg: SenderAllowlistConfig,
-): PermittedScope | null {
-  if (!cfg.users || !cfg.workstreams) return null;
+export function removeAllowlistEntry(chatJid: string, pathOverride?: string): void {
+  // No-op: per-chat modes moved to YAML
+}
 
-  let resolved: ResolvedWorkstream[];
-
-  // Check if chatJid is a known group
-  if (cfg.groups && cfg.groups[chatJid]) {
-    // Group message — intersection of all members' workstreams
-    const memberJids = resolveGroupMembers(chatJid, cfg);
-    if (memberJids.length === 0) return null;
-    resolved = getGroupWorkstreams(memberJids, cfg);
-  } else {
-    // DM or unknown group — scope to sender's workstreams
-    const user = resolveUser(senderJid, cfg);
-    if (!user) return null;
-    resolved = getUserWorkstreams(user.user, cfg);
-  }
-
-  if (resolved.length === 0) return null;
-
-  return {
-    workstreams: resolved.map((w) => w.name).join(','),
-    qmdCollections: resolved.map((w) => w.info.qmd_collection).join(','),
-    mountPaths: resolved.map((w) => w.info.mount_path).join(','),
-    workstreamNames: resolved.map((w) => w.name).join(', '),
-  };
+// Deprecated: shouldDropMessage is no longer needed.
+// Use getSenderPolicy() from channel-config.ts instead.
+export function shouldDropMessage(): boolean {
+  return false;
 }

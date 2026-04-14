@@ -36,6 +36,7 @@ import {
   EMAIL_CHANNEL_ENABLED,
   EMAIL_INTAKE_ACCOUNT,
   TELEGRAM_BOT_TOKEN,
+  DISCORD_BOT_TOKEN,
   TELEGRAM_ONLY,
   TIMEZONE,
 } from './config.js';
@@ -49,6 +50,7 @@ import { SignalChannel } from './channels/signal.js';
 import { SlackChannel } from './channels/slack.js';
 import { EmailChannel } from './channels/email.js';
 import { TelegramChannel } from './channels/telegram.js';
+import { DiscordChannel } from './channels/discord.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -90,13 +92,13 @@ import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
-  shouldDropMessage,
-} from './sender-allowlist.js';
+
+} from './user-identity.js';
 import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { loadChannelConfigs, getQmdPorts } from './channel-config.js';
+import { loadChannelConfigs, getQmdPorts, getListeningMode, getChannelConfig, getSenderPolicy } from './channel-config.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
@@ -283,8 +285,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // listening_mode from YAML channel config takes precedence over DB requiresTrigger.
+  // intake  → silent listener only; never invoke agent (intake written on message receipt)
+  // mention → trigger (@jibot mention) required
+  // active  → no trigger required (invoke on all messages)
+  // null    → fall back to DB requiresTrigger field
+  const listeningMode = getListeningMode(chatJid, channelConfigs);
+  if (listeningMode === 'silent') return true;
+
+  const effectiveNeedsTrigger = listeningMode === 'active'
+    ? false
+    : listeningMode === 'attentive'
+      ? true
+      : !isMainGroup && group.requiresTrigger !== false;
+
+  if (effectiveNeedsTrigger) {
     const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
@@ -380,6 +395,19 @@ ${prompt}`
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
+
+      // Suppress API error results — the SDK emits these as "successful" results
+      // when its built-in retries are exhausted. Don't forward to the user;
+      // instead let group-queue backoff retry the whole invocation.
+      if (/^API Error: \d{3}\b/.test(text)) {
+        logger.warn(
+          { group: group.name },
+          `Suppressing API error from user output: ${text.slice(0, 200)}`,
+        );
+        hadError = true;
+        return;
+      }
+
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
@@ -584,7 +612,20 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+
+          // listening_mode from YAML channel config takes precedence over DB requiresTrigger.
+          // intake  → silent listener only; never invoke agent
+          // mention → trigger (@jibot mention) required
+          // active  → no trigger required
+          // null    → fall back to DB requiresTrigger field
+          const loopListeningMode = getListeningMode(chatJid, channelConfigs);
+          if (loopListeningMode === 'silent') continue;
+
+          const needsTrigger = loopListeningMode === 'active'
+            ? false
+            : loopListeningMode === 'attentive'
+              ? true
+              : !isMainGroup && group.requiresTrigger !== false;
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
@@ -826,11 +867,45 @@ function autoRegisterSlackContact(chatJid: string, nameOrId: string, isGroup: bo
   return true;
 }
 
+/**
+ * Log a startup summary of listening modes for all registered groups.
+ * Groups with no YAML config fall back to DB requiresTrigger — these are flagged
+ * as ungoverned so the operator knows to add a channel config.
+ */
+function validateListeningModes(): void {
+  const ungoverned: string[] = [];
+
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    const mode = getListeningMode(jid, channelConfigs);
+    if (mode) {
+      logger.info(
+        { jid, group: group.name, mode },
+        'channel-config: listening mode',
+      );
+    } else {
+      // No YAML config — effective mode derived from DB
+      const effectiveMode = group.isMain
+        ? 'active (main)'
+        : group.requiresTrigger === false
+          ? 'active (DB fallback)'
+          : 'mention (DB fallback)';
+      ungoverned.push(`  ${group.name} [${group.folder}] → ${effectiveMode}`);
+    }
+  }
+
+  if (ungoverned.length > 0) {
+    logger.warn(
+      `channel-config: ${ungoverned.length} groups have no YAML config (add ops/jibot/channels/{platform}-{name}.yaml to govern):\n${ungoverned.join('\n')}`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  validateListeningModes();
 
   // Start credential proxy for container API access
   const { startCredentialProxy } = await import('./credential-proxy.js');
@@ -942,13 +1017,13 @@ async function main(): Promise<void> {
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
         if (
-          shouldDropMessage(chatJid, cfg) &&
+          getSenderPolicy(chatJid, channelConfigs) === 'drop' &&
           !isSenderAllowed(chatJid, msg.sender, cfg)
         ) {
           if (cfg.logDenied) {
             logger.debug(
               { chatJid, sender: msg.sender },
-              'sender-allowlist: dropping message (drop mode)',
+              'channel-config: dropping message (sender_policy=drop)',
             );
           }
           return;
@@ -974,7 +1049,7 @@ async function main(): Promise<void> {
         registeredGroups[chatJid]
       ) {
         const group = registeredGroups[chatJid];
-        if (group.intakeAccess && shouldRunIntake(group.channelMode, false)) {
+        if (group.intakeAccess && shouldRunIntake(group.channelMode ?? 'listening', false)) {
           const workstream = group.folder.split('-')[0];
           if (!workstream || !fs.existsSync(path.join(CONFIDENTIAL_ROOT, workstream))) {
             logger.warn(
@@ -1000,8 +1075,44 @@ async function main(): Promise<void> {
         }
       }
 
+      // Channel-config intake mode: write to confidential domain intake for
+      // any non-GIDC channel configured with listening_mode: intake.
+      if (!msg.is_from_me && !msg.is_bot_message) {
+        const chCfg = getChannelConfig(chatJid, channelConfigs);
+        // confidential_intake flag (explicit) takes precedence; defaults to true for intake-mode channels with domains
+          const wantsIntake = chCfg?.confidential_intake !== undefined
+            ? chCfg.confidential_intake
+            : chCfg?.listening_mode === 'silent';
+          if (wantsIntake && chCfg!.domains.length > 0) {
+          const domain = chCfg!.domains[0];
+          const workstream = domain.replace(/^confidential\//, '');
+          if (workstream && fs.existsSync(path.join(CONFIDENTIAL_ROOT, workstream))) {
+            try {
+              writeIntakeFile(CONFIDENTIAL_ROOT, {
+                author: msg.sender_name,
+                senderId: msg.sender,
+                channelId: chatJid,
+                channelName: registeredGroups[chatJid]?.name ?? chatJid,
+                workstream,
+                text: msg.content,
+                timestamp: msg.timestamp,
+                type: `${chCfg!.platform}-intake`,
+                source: chatJid,
+              });
+            } catch (err) {
+              logger.warn({ err, chatJid }, 'intake-mode write failed');
+            }
+          }
+        }
+      }
+
       // jibrain intake: write substantive messages to Syncthing-synced jibrain
-      if (!msg.is_from_me && !msg.is_bot_message && msg.content.length >= 20) {
+      // Skip channels that write to confidential intake (prevent leak to shared jibrain)
+      const jbChCfg = getChannelConfig(chatJid, channelConfigs);
+      const wantsConfIntake = jbChCfg?.confidential_intake !== undefined
+        ? jbChCfg.confidential_intake
+        : jbChCfg?.listening_mode === 'silent' && (jbChCfg?.domains?.length ?? 0) > 0;
+      if (!wantsConfIntake && !msg.is_from_me && !msg.is_bot_message && msg.content.length >= 20) {
         const ch = chatJid.split(':')[0] || 'unknown';
         execFile('/bin/bash', [
           path.join(process.env.HOME || '/Users/jibot', 'scripts/nanoclaw-jibrain-hook.sh'),
@@ -1142,6 +1253,18 @@ async function main(): Promise<void> {
       logger.info('Telegram channel connected');
     } catch (err) {
       logger.error({ err }, 'Failed to connect Telegram channel');
+    }
+  }
+
+  // Discord channel (if configured)
+  if (DISCORD_BOT_TOKEN) {
+    const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
+    channels.push(discord);
+    try {
+      await discord.connect();
+      logger.info('Discord channel connected');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect Discord channel');
     }
   }
 
