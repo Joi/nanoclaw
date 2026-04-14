@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
 """
-Review and compact learned facts across all NanoClaw group CLAUDE.md files.
-
-For each group with a ## Learned Facts section:
-1. Display all facts for human review
-2. Use Claude to suggest which facts to keep/merge/remove
-3. Output a summary for the weekly review
+Review and compact learned facts in NanoClaw CLAUDE.md files.
+When compacting, prioritizes recent facts over older ones.
 
 Usage:
   python3 review-learned-facts.py [--compact] [--group <folder>]
-
-Without --compact: display-only mode (for weekly review reading)
-With --compact: use Claude to merge/deduplicate facts and rewrite section
 """
 import json
 import os
+import re
 import sys
 import urllib.request
-from pathlib import Path
+from datetime import datetime
 
 COMPACT = "--compact" in sys.argv
 TARGET_GROUP = None
@@ -40,7 +34,6 @@ if not API_KEY:
 
 
 def find_groups_with_facts():
-    """Find all groups that have a ## Learned Facts section."""
     groups = []
     if not os.path.isdir(GROUPS_DIR):
         return groups
@@ -55,39 +48,41 @@ def find_groups_with_facts():
 
 
 def extract_facts_section(content):
-    """Extract just the learned facts section."""
     marker = "## Learned Facts"
     idx = content.find(marker)
     if idx == -1:
-        return ""
-    section = content[idx:]
-    next_heading = section.find("\n## ", len(marker))
-    if next_heading != -1:
-        section = section[:next_heading]
-    return section
+        return "", idx, -1
+    section_start = idx
+    rest = content[idx:]
+    next_heading = rest.find("\n## ", len(marker))
+    section_end = idx + next_heading if next_heading != -1 else len(content)
+    section = content[section_start:section_end]
+    return section, section_start, section_end
+
+
+def count_facts(section):
+    return len([l for l in section.split("\n") if l.strip().startswith("- ")])
 
 
 def compact_facts(facts_section, group_name):
-    """Use Claude to merge/deduplicate/remove stale facts."""
     if not API_KEY:
-        print("  SKIP compact: no API key")
         return None
 
-    prompt = f"""Review these learned facts from the "{group_name}" chat group. 
-Compact them by:
-1. Removing facts that are likely stale or no longer relevant
-2. Merging duplicate/overlapping facts into single entries
-3. Keeping facts that are durable preferences, relationships, or decisions
-4. Preserving date context where useful
+    prompt = f"""Compact these learned facts from the "{group_name}" chat group.
 
-Output the compacted facts as bullet points starting with "- ".
-If all facts should be kept as-is, output them unchanged.
-If all facts are stale, output "SECTION_EMPTY".
+RULES:
+1. MERGE duplicates into a single, more complete entry
+2. REMOVE facts that are clearly stale or transient (debugging sessions, temporary plans that have passed)
+3. KEEP durable facts: preferences, relationships, commitments, key dates, decisions
+4. PRIORITIZE RECENT facts (later dates) over older ones -- if two facts conflict, keep the newer one
+5. Preserve date context only for time-sensitive facts (deadlines, events, trips)
+6. Output as clean bullet points starting with "- "
+7. NO date headers (### YYYY-MM-DD) -- just a flat list of deduplicated facts
+8. If everything is stale, output "SECTION_EMPTY"
 
-Current facts:
 {facts_section}
 
-Compacted facts:"""
+Compacted facts (flat bullet list, no date headers):"""
 
     data = json.dumps({
         "model": "claude-haiku-4-5",
@@ -104,7 +99,6 @@ Compacted facts:"""
             "anthropic-version": "2023-06-01",
         },
     )
-
     resp = urllib.request.urlopen(req, timeout=30)
     result = json.loads(resp.read())
     return result.get("content", [{}])[0].get("text", "").strip()
@@ -112,7 +106,6 @@ Compacted facts:"""
 
 def main():
     groups = find_groups_with_facts()
-
     if TARGET_GROUP:
         groups = [(f, p, c) for f, p, c in groups if f == TARGET_GROUP]
 
@@ -122,40 +115,51 @@ def main():
 
     print(f"=== NanoClaw Learned Facts Review ({len(groups)} groups) ===\n")
 
+    total_before = 0
+    total_after = 0
+
     for folder, claude_md, content in sorted(groups):
-        facts = extract_facts_section(content)
-        if not facts.strip() or facts.strip() == "## Learned Facts":
+        section, start, end = extract_facts_section(content)
+        n = count_facts(section)
+        if n == 0:
             continue
 
-        # Count facts
-        fact_lines = [l for l in facts.split("\n") if l.strip().startswith("- ")]
-
-        print(f"### {folder} ({len(fact_lines)} facts)")
-        print(facts.strip())
+        total_before += n
+        print(f"### {folder} ({n} facts)")
+        print(section.strip())
         print()
 
-        if COMPACT and fact_lines:
-            print("  Compacting...")
-            compacted = compact_facts(facts, folder)
-            if compacted and compacted != "SECTION_EMPTY":
-                # Rewrite the section
-                before = content[:content.find("## Learned Facts")]
-                after_section = content[content.find("## Learned Facts"):]
-                next_heading = after_section.find("\n## ", len("## Learned Facts"))
-                remainder = after_section[next_heading:] if next_heading != -1 else ""
+        if COMPACT:
+            print(f"  Compacting {n} facts...")
+            compacted = compact_facts(section, folder)
 
-                new_content = before + "## Learned Facts\n\n" + compacted + "\n" + remainder
-                with open(claude_md, "w") as f:
-                    f.write(new_content)
-
-                new_count = len([l for l in compacted.split("\n") if l.strip().startswith("- ")])
-                print(f"  Compacted: {len(fact_lines)} -> {new_count} facts\n")
-            elif compacted == "SECTION_EMPTY":
-                print("  All facts stale -- section cleared\n")
+            if not compacted or compacted == "SECTION_EMPTY":
+                new_section = "## Learned Facts\n\n*No durable facts retained after compaction.*\n"
+                new_n = 0
             else:
-                print("  No changes needed\n")
+                # Clean up: ensure flat list
+                lines = [l.strip() for l in compacted.split("\n") if l.strip().startswith("- ")]
+                new_section = "## Learned Facts\n\n" + "\n".join(lines) + "\n"
+                new_n = len(lines)
 
-    print("=== End Review ===")
+            total_after += new_n
+
+            # Rewrite the section in the file
+            before = content[:start]
+            after = content[end:]
+            new_content = before + new_section + after
+
+            with open(claude_md, "w") as f:
+                f.write(new_content)
+
+            print(f"  {n} -> {new_n} facts\n")
+        else:
+            total_after += n
+
+    if COMPACT:
+        print(f"=== Compaction complete: {total_before} -> {total_after} facts ===")
+    else:
+        print(f"=== {total_before} total facts across {len(groups)} groups ===")
 
 
 if __name__ == "__main__":
