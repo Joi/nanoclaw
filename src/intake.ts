@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { logger } from './logger.js';
+import { loadUserIdentity, resolveUser } from './user-identity.js';
+import { loadChannelConfigs, getChannelConfig, type ChannelConfig } from './channel-config.js';
 
 export interface IntakeAttachment {
   originalFilename: string;
@@ -17,6 +19,10 @@ export interface IntakeMessage {
   text: string;
   timestamp: string;
   attachments?: IntakeAttachment[];
+  /** Frontmatter type field. Defaults to 'slack-intake'. */
+  type?: string;
+  /** Full source string for frontmatter. Defaults to "slack:gidc:channel:{channelId}". */
+  source?: string;
 }
 
 /**
@@ -61,6 +67,27 @@ export function wikiLinkMentions(text: string, identityIndexPath: string): strin
  * Creates the intake directory if needed, writes YAML frontmatter + body,
  * and returns the written file path.
  */
+// Cached identity config and channel configs (loaded once per process)
+let _identityCfg: ReturnType<typeof loadUserIdentity> | null = null;
+let _channelCfgs: ReturnType<typeof loadChannelConfigs> | null = null;
+
+function getIdentityConfig() {
+  if (!_identityCfg) _identityCfg = loadUserIdentity();
+  return _identityCfg;
+}
+
+function getChannelConfigs() {
+  const cfgDir = path.join(process.env.HOME || "/Users/jibot", "switchboard", "ops", "jibot", "channels");
+  if (!_channelCfgs) _channelCfgs = loadChannelConfigs(cfgDir);
+  return _channelCfgs;
+}
+
+/** Invalidate cached configs (call when configs are reloaded). */
+export function resetIntakeConfigCache(): void {
+  _identityCfg = null;
+  _channelCfgs = null;
+}
+
 export function writeIntakeFile(confidentialRoot: string, msg: IntakeMessage): string {
   // (1) Build intakeDir and create it
   const intakeDir = path.join(confidentialRoot, msg.workstream, 'intake');
@@ -76,13 +103,33 @@ export function writeIntakeFile(confidentialRoot: string, msg: IntakeMessage): s
   // (3) Generate briefTopic from first ~60 chars of text or 'attachment upload'
   const briefTopic = msg.text ? msg.text.substring(0, 60) : 'attachment upload';
 
-  // (4) Build YAML frontmatter
+  // (4) Resolve sender_name from identity config (bare JID suffix matching)
+  let senderName: string | undefined;
+  if (msg.senderId) {
+    const resolved = resolveUser(msg.senderId, getIdentityConfig());
+    if (resolved) {
+      senderName = resolved.name;
+    }
+  }
+
+  // (5) Resolve channel_name from channel configs
+  let channelName: string | undefined;
+  const intakeSource = msg.source ?? `slack:gidc:channel:${msg.channelId}`;
+  const channelCfg = getChannelConfig(intakeSource, getChannelConfigs());
+  if (channelCfg) {
+    channelName = (channelCfg as any).group_name || channelCfg.channel_name;
+  }
+
+  // (6) Build YAML frontmatter
+  const intakeType = msg.type ?? 'slack-intake';
   const frontmatter = [
     '---',
-    'type: slack-intake',
-    `source: "slack:gidc:channel:${msg.channelId}"`,
+    `type: ${intakeType}`,
+    `source: "${intakeSource}"`,
     `author: "${msg.author}"`,
     ...(msg.senderId ? [`sender_id: "${msg.senderId}"`] : []),
+    ...(senderName ? [`sender_name: "${senderName}"`] : []),
+    ...(channelName ? [`channel_name: "${channelName}"`] : []),
     `date: "${msg.timestamp}"`,
     'classification: confidential',
     `workstream: "${msg.workstream}"`,

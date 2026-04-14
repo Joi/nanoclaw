@@ -121,7 +121,14 @@ export function resolveUser(
 ): ResolvedUser | null {
   if (!cfg.users || typeof cfg.users !== 'object') return null;
   for (const [name, user] of Object.entries(cfg.users)) {
-    if (Array.isArray(user?.jids) && user.jids.includes(jid)) {
+    if (!Array.isArray(user?.jids)) continue;
+    // Exact match first (prefixed JIDs like "sig:UUID" or "slack:ws:UID")
+    if (user.jids.includes(jid)) {
+      return { name, user };
+    }
+    // Suffix match: bare UUID/ID matches "sig:UUID", "slack:ws:UID", etc.
+    // This handles intake files that store raw platform IDs without prefixes.
+    if (jid && user.jids.some(j => j.endsWith(':' + jid) || j.endsWith(jid))) {
       return { name, user };
     }
   }
