@@ -98,7 +98,8 @@ import { startSessionCleanup } from './session-cleanup.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { loadChannelConfigs, getQmdPorts, getListeningMode, getChannelConfig, getSenderPolicy } from './channel-config.js';
+import { loadChannelConfigs, getQmdPorts, getListeningMode, getChannelConfig, getSenderPolicy, getAccessFlags,
+} from './channel-config.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
@@ -906,6 +907,71 @@ function autoRegisterSlackContact(chatJid: string, nameOrId: string, isGroup: bo
  * Groups with no YAML config fall back to DB requiresTrigger — these are flagged
  * as ungoverned so the operator knows to add a channel config.
  */
+
+/**
+ * Sync YAML channel configs → DB registered_groups on startup.
+ * Ensures YAML is the single source of truth for group configuration.
+ * New YAML configs get auto-registered; existing ones get access flags updated.
+ */
+function syncYamlToDb(): void {
+  const ASSISTANT = process.env.ASSISTANT_NAME || 'jibot';
+  let created = 0;
+  let updated = 0;
+
+  for (const [jid, config] of channelConfigs) {
+    const existing = registeredGroups[jid];
+    const access = getAccessFlags(jid, channelConfigs);
+    const requiresTrigger = config.listening_mode !== 'active';
+    const logTriggeredOnly = config.listening_mode === 'silent';
+
+    if (existing) {
+      // Update access flags and listening-mode-derived fields from YAML
+      const group: RegisteredGroup = {
+        ...existing,
+        requiresTrigger,
+        logTriggeredOnly: logTriggeredOnly || undefined,
+        remindersAccess: access.reminders || undefined,
+        bookmarksAccess: access.bookmarks || undefined,
+        emailAccess: access.email || undefined,
+        calendarAccess: access.calendar || undefined,
+        fileServingAccess: access.file_serving || undefined,
+        intakeAccess: access.intake || undefined,
+      };
+      setRegisteredGroup(jid, group);
+      registeredGroups[jid] = group;
+      updated++;
+    } else {
+      // Auto-register new YAML config
+      const group: RegisteredGroup = {
+        name: (config as any).group_name || config.channel_name,
+        folder: config.channel_name,
+        trigger: `@${ASSISTANT}`,
+        added_at: new Date().toISOString(),
+        requiresTrigger,
+        logTriggeredOnly: logTriggeredOnly || undefined,
+        remindersAccess: access.reminders || undefined,
+        bookmarksAccess: access.bookmarks || undefined,
+        emailAccess: access.email || undefined,
+        calendarAccess: access.calendar || undefined,
+        fileServingAccess: access.file_serving || undefined,
+        intakeAccess: access.intake || undefined,
+      };
+      try {
+        setRegisteredGroup(jid, group);
+        registeredGroups[jid] = group;
+        created++;
+        logger.info({ jid, folder: group.folder }, 'Auto-registered group from YAML config');
+      } catch (err) {
+        logger.warn({ jid, folder: group.folder, err }, 'Failed to auto-register group from YAML');
+      }
+    }
+  }
+
+  if (created > 0 || updated > 0) {
+    logger.info({ created, updated }, 'YAML → DB sync complete');
+  }
+}
+
 function validateListeningModes(): void {
   const ungoverned: string[] = [];
 
@@ -939,6 +1005,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  syncYamlToDb();
   migrateStaleTriggersOnStartup();
   validateListeningModes();
 

@@ -191,6 +191,16 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  // Add access flag columns if they don't exist (config normalization — YAML-first Phase 2)
+  for (const col of [
+    'reminders_access', 'bookmarks_access', 'email_access',
+    'calendar_access', 'file_serving_access', 'intake_access',
+  ]) {
+    try {
+      database.exec(`ALTER TABLE registered_groups ADD COLUMN ${col} INTEGER DEFAULT 0`);
+    } catch { /* column already exists */ }
+  }
 }
 
 export function initDatabase(): void {
@@ -644,6 +654,12 @@ export function getRegisteredGroup(
         requires_trigger: number | null;
         log_triggered_only: number | null;
         is_main: number | null;
+        reminders_access: number | null;
+        bookmarks_access: number | null;
+        email_access: number | null;
+        calendar_access: number | null;
+        file_serving_access: number | null;
+        intake_access: number | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -667,6 +683,12 @@ export function getRegisteredGroup(
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     logTriggeredOnly: row.log_triggered_only === 1 ? true : undefined,
     isMain: row.is_main === 1 ? true : undefined,
+    remindersAccess: row.reminders_access === 1 ? true : undefined,
+    bookmarksAccess: row.bookmarks_access === 1 ? true : undefined,
+    emailAccess: row.email_access === 1 ? true : undefined,
+    calendarAccess: row.calendar_access === 1 ? true : undefined,
+    fileServingAccess: row.file_serving_access === 1 ? true : undefined,
+    intakeAccess: row.intake_access === 1 ? true : undefined,
   };
 }
 
@@ -675,8 +697,12 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, log_triggered_only, is_main)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups
+     (jid, name, folder, trigger_pattern, added_at, container_config,
+      requires_trigger, log_triggered_only, is_main,
+      reminders_access, bookmarks_access, email_access,
+      calendar_access, file_serving_access, intake_access)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -687,6 +713,12 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.logTriggeredOnly ? 1 : 0,
     group.isMain ? 1 : 0,
+    group.remindersAccess ? 1 : 0,
+    group.bookmarksAccess ? 1 : 0,
+    group.emailAccess ? 1 : 0,
+    group.calendarAccess ? 1 : 0,
+    group.fileServingAccess ? 1 : 0,
+    group.intakeAccess ? 1 : 0,
   );
 }
 
@@ -701,6 +733,12 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     requires_trigger: number | null;
     log_triggered_only: number | null;
     is_main: number | null;
+    reminders_access: number | null;
+    bookmarks_access: number | null;
+    email_access: number | null;
+    calendar_access: number | null;
+    file_serving_access: number | null;
+    intake_access: number | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -723,6 +761,12 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
       logTriggeredOnly: row.log_triggered_only === 1 ? true : undefined,
       isMain: row.is_main === 1 ? true : undefined,
+      remindersAccess: row.reminders_access === 1 ? true : undefined,
+      bookmarksAccess: row.bookmarks_access === 1 ? true : undefined,
+      emailAccess: row.email_access === 1 ? true : undefined,
+      calendarAccess: row.calendar_access === 1 ? true : undefined,
+      fileServingAccess: row.file_serving_access === 1 ? true : undefined,
+      intakeAccess: row.intake_access === 1 ? true : undefined,
     };
   }
   return result;
