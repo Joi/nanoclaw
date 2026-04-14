@@ -64,14 +64,14 @@ export class DiscordChannel implements Channel {
         ? (msg.channel as TextChannel).name || chatJid
         : senderName;
 
-      // Translate Discord @bot mentions into TRIGGER_PATTERN format.
-      // Discord <@BOT_ID> mentions won't match TRIGGER_PATTERN (e.g., ^@jibot\b),
-      // so we prepend the trigger when the bot is @mentioned.
-      if (this.botUserId && content.includes(`<@${this.botUserId}>`)) {
-        // Remove the Discord mention syntax
-        content = content.replace(new RegExp(`<@!?${this.botUserId}>`, 'g'), '').trim();
-        if (!TRIGGER_PATTERN.test(content)) {
-          content = `@${ASSISTANT_NAME} ${content}`;
+      // Translate Discord <@BOT_ID> mentions into @jibot in-place.
+      // Discord mentions are opaque IDs like <@1234567890> that the LLM can't interpret.
+      // Replace them with the readable @name so the agent understands it's being addressed
+      // AND the trigger pattern matches naturally wherever the mention appears in the message.
+      if (this.botUserId) {
+        const mentionRe = new RegExp(`<@!?${this.botUserId}>`, 'g');
+        if (mentionRe.test(content)) {
+          content = content.replace(mentionRe, `@${ASSISTANT_NAME}`);
         }
       }
 
