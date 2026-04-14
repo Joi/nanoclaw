@@ -31,7 +31,7 @@ describe('buildUsersSnapshot', () => {
       'slack:gidc:U001': {
         name: 'slack:gidc:U001',
         folder: 'gidc-template-owner',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2026-01-01T00:00:00.000Z',
         remindersAccess: true,
         calendarAccess: true,
@@ -39,27 +39,27 @@ describe('buildUsersSnapshot', () => {
       'slack:gidc:U002': {
         name: 'slack:gidc:U002',
         folder: 'gidc-template-admin',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2026-01-02T00:00:00.000Z',
       },
       'slack:gidc:U003': {
         name: 'slack:gidc:U003',
         folder: 'gidc-template-staff',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2026-01-03T00:00:00.000Z',
       },
       // Different namespace -- should be excluded
       'slack:other:U999': {
         name: 'slack:other:U999',
         folder: 'gidc-template-staff',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2026-01-04T00:00:00.000Z',
       },
       // Channel JID -- should be skipped
       'slack:gidc:channel:general': {
         name: 'slack:gidc:channel:general',
         folder: 'gidc-template-staff',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2026-01-05T00:00:00.000Z',
       },
     };
@@ -100,7 +100,7 @@ describe('buildUsersSnapshot', () => {
       'slack:other:U999': {
         name: 'slack:other:U999',
         folder: 'gidc-template-staff',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2026-01-01T00:00:00.000Z',
       },
     };
@@ -119,7 +119,7 @@ describe('writeUsersSnapshot', () => {
       'slack:gidc:U100': {
         name: 'slack:gidc:U100',
         folder: 'gidc-template-admin',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2026-02-01T00:00:00.000Z',
         remindersAccess: true,
         calendarAccess: true,

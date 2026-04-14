@@ -31,6 +31,7 @@ const envConfig = readEnvFile([
   'SLACK_4_NAMESPACE',
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
+  'DISCORD_BOT_TOKEN',
   'CONFIDENTIAL_ROOT',
   'EMAIL_CHANNEL_ENABLED',
   'EMAIL_INTAKE_ACCOUNT',
@@ -38,7 +39,7 @@ const envConfig = readEnvFile([
 ]);
 
 export const ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'jibot';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
@@ -63,6 +64,9 @@ export const SLACK_2_NAMESPACE = process.env.SLACK_2_NAMESPACE || envConfig.SLAC
 // Telegram configuration
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
 export const TELEGRAM_ONLY = (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+
+// Discord configuration
+export const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
 
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;

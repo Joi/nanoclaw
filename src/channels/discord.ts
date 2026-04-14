@@ -65,7 +65,7 @@ export class DiscordChannel implements Channel {
         : senderName;
 
       // Translate Discord @bot mentions into TRIGGER_PATTERN format.
-      // Discord <@BOT_ID> mentions won't match TRIGGER_PATTERN (e.g., ^@Andy\b),
+      // Discord <@BOT_ID> mentions won't match TRIGGER_PATTERN (e.g., ^@jibot\b),
       // so we prepend the trigger when the bot is @mentioned.
       if (this.botUserId && content.includes(`<@${this.botUserId}>`)) {
         // Remove the Discord mention syntax

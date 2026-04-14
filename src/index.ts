@@ -163,6 +163,35 @@ function loadState(): void {
 }
 
 /**
+ * Startup migration: fix trigger patterns that reference a stale ASSISTANT_NAME.
+ * Groups registered under a previous name silently fail because their trigger
+ * regex never matches messages transformed with the current name.
+ */
+function migrateStaleTriggersOnStartup(): void {
+  const expectedTrigger = DEFAULT_TRIGGER;
+  let migrated = 0;
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (
+      group.trigger &&
+      group.trigger.startsWith('@') &&
+      group.trigger !== expectedTrigger &&
+      group.trigger !== 'always'
+    ) {
+      logger.warn(
+        { jid, oldTrigger: group.trigger, newTrigger: expectedTrigger },
+        'Migrating stale trigger pattern to current ASSISTANT_NAME',
+      );
+      group.trigger = expectedTrigger;
+      setRegisteredGroup(jid, group);
+      migrated++;
+    }
+  }
+  if (migrated > 0) {
+    logger.info({ migrated }, 'Trigger pattern migration complete');
+  }
+}
+
+/**
  * Return the message cursor for a group, recovering from the last bot reply
  * if lastAgentTimestamp is missing (new group, corrupted state, restart).
  */
@@ -217,9 +246,9 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     );
     if (fs.existsSync(templateFile)) {
       let content = fs.readFileSync(templateFile, 'utf-8');
-      if (ASSISTANT_NAME !== 'Andy') {
-        content = content.replace(/^# Andy$/m, `# ${ASSISTANT_NAME}`);
-        content = content.replace(/You are Andy/g, `You are ${ASSISTANT_NAME}`);
+      if (ASSISTANT_NAME !== 'jibot') {
+        content = content.replace(/^# jibot$/m, `# ${ASSISTANT_NAME}`);
+        content = content.replace(/You are jibot/g, `You are ${ASSISTANT_NAME}`);
       }
       fs.writeFileSync(groupMdFile, content);
       logger.info({ folder: group.folder }, 'Created CLAUDE.md from template');
@@ -910,6 +939,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  migrateStaleTriggersOnStartup();
   validateListeningModes();
 
   // Start credential proxy for container API access

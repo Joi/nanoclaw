@@ -113,7 +113,7 @@ import fs from "fs";
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
   folder: 'test-group',
-  trigger: '@Andy',
+  trigger: '@jibot',
   added_at: new Date().toISOString(),
 };
 

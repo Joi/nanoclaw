@@ -4,8 +4,8 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // Mock config
 vi.mock('../config.js', () => ({
-  ASSISTANT_NAME: 'Andy',
-  TRIGGER_PATTERN: /^@Andy\b/i,
+  ASSISTANT_NAME: 'jibot',
+  TRIGGER_PATTERN: /^@jibot\b/i,
 }));
 
 // Mock logger
@@ -77,7 +77,7 @@ function createTestOpts(
       'tg:100200300': {
         name: 'Test Group',
         folder: 'test-group',
-        trigger: '@Andy',
+        trigger: '@jibot',
         added_at: '2024-01-01T00:00:00.000Z',
       },
     })),
@@ -348,7 +348,7 @@ describe('TelegramChannel', () => {
           'tg:100200300': {
             name: 'Private',
             folder: 'private',
-            trigger: '@Andy',
+            trigger: '@jibot',
             added_at: '2024-01-01T00:00:00.000Z',
           },
         })),
@@ -424,7 +424,7 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '@Andy @andy_ai_bot what time is it?',
+          content: '@jibot @andy_ai_bot what time is it?',
         }),
       );
     });
@@ -435,16 +435,16 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const ctx = createTextCtx({
-        text: '@Andy @andy_ai_bot hello',
+        text: '@jibot @andy_ai_bot hello',
         entities: [{ type: 'mention', offset: 6, length: 12 }],
       });
       await triggerTextMessage(ctx);
 
-      // Should NOT double-prepend — already starts with @Andy
+      // Should NOT double-prepend — already starts with @jibot
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '@Andy @andy_ai_bot hello',
+          content: '@jibot @andy_ai_bot hello',
         }),
       );
     });
@@ -483,7 +483,7 @@ describe('TelegramChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '@Andy hey @andy_ai_bot check this',
+          content: '@jibot hey @andy_ai_bot check this',
         }),
       );
     });
@@ -903,7 +903,7 @@ describe('TelegramChannel', () => {
 
       await handler(ctx);
 
-      expect(ctx.reply).toHaveBeenCalledWith('Andy is online.');
+      expect(ctx.reply).toHaveBeenCalledWith('jibot is online.');
     });
   });
 
