@@ -4,16 +4,17 @@
  *
  * - active: responds to all messages, ingests all messages
  * - attentive: responds only when mentioned, ingests all messages
- * - on-call: responds only when mentioned, ingests only when mentioned
  * - silent: never responds, never ingests
+ *
+ * Deprecated: "on-call" (removed 2026-04-14, was identical to attentive
+ * in practice since channel-config.ts normalized both to "mention")
  */
 
-export type ListeningMode = 'active' | 'attentive' | 'on-call' | 'silent';
+export type ListeningMode = 'active' | 'attentive' | 'silent';
 
 const VALID_MODES: ReadonlySet<string> = new Set<ListeningMode>([
   'active',
   'attentive',
-  'on-call',
   'silent',
 ]);
 
@@ -32,6 +33,8 @@ export function parseListeningModeCommand(text: string): ListeningMode | null {
   const match = text.match(/set listening mode to (\S+)/i);
   if (!match) return null;
   const candidate = match[1].toLowerCase();
+  // Accept deprecated "on-call" as attentive
+  if (candidate === 'on-call') return 'attentive';
   return isValidListeningMode(candidate) ? candidate : null;
 }
 
@@ -39,7 +42,6 @@ export function parseListeningModeCommand(text: string): ListeningMode | null {
  * Whether the bot should respond to a message in the given mode.
  * - active: always
  * - attentive: only when mentioned
- * - on-call: only when mentioned
  * - silent: never
  */
 export function shouldRespond(
@@ -50,7 +52,6 @@ export function shouldRespond(
     case 'active':
       return true;
     case 'attentive':
-    case 'on-call':
       return isMentioned;
     case 'silent':
       return false;
@@ -61,7 +62,6 @@ export function shouldRespond(
  * Whether the bot should ingest (store/process) a message in the given mode.
  * - active: always
  * - attentive: always
- * - on-call: only when mentioned
  * - silent: never
  */
 export function shouldIngest(
@@ -72,8 +72,6 @@ export function shouldIngest(
     case 'active':
     case 'attentive':
       return true;
-    case 'on-call':
-      return isMentioned;
     case 'silent':
       return false;
   }

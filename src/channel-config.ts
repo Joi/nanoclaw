@@ -16,7 +16,25 @@ export interface ChannelConfig {
   channel_name: string;
   floor: 'owner' | 'admin' | 'staff' | 'guest';
   domains: string[];
-  listening_mode: 'active' | 'attentive' | 'on-call' | 'silent';
+  /**
+   * How jibot engages with this channel:
+   *   active  — responds to every message (no trigger needed)
+   *   mention — responds only when @jibot is mentioned
+   *   intake  — silent listener; writes messages to confidential intake, never invokes agent
+   *
+   * Deprecated aliases still accepted in YAML (normalized on load):
+   *   attentive → mention
+   *   silent              → intake
+   */
+  listening_mode: 'active' | 'mention' | 'intake';
+  /**
+  * When true, messages are written to the confidential intake area
+  * (derived from domains[0]) regardless of listening_mode.
+  * This decouples "when does the agent respond" (listening_mode)
+  * from "where do messages get filed" (confidential_intake).
+  * Defaults to true for intake-mode channels with domains, false otherwise.
+  */
+  confidential_intake?: boolean;
   members: Record<string, { name: string; tier: string; person_ref?: string }>;
 }
 
@@ -28,6 +46,7 @@ export const QMD_PORTS: Record<string, number> = {
   'domain-sankosh': 7336,
   'domain-bhutan': 7337,
   'domain-gmc': 7338,
+  'domain-wikipedia': 7339,
 } as const;
 
 /** Map from confidential/{slug} path to QMD index name */
@@ -60,16 +79,37 @@ export function loadChannelConfigs(
       const parsed = YAML.parse(raw) as ChannelConfig;
 
       if (!parsed.platform || !parsed.channel_id) {
-        logger.warn({ file }, 'channel-config: skipping invalid config');
+        logger.warn({ file }, 'channel-config: skipping (missing platform or channel_id)');
         continue;
       }
 
-      // Build JID key: slack:{workspace}:channel:{channel_id}
-      const ns = parsed.workspace ? `${parsed.platform}:${parsed.workspace}` : parsed.platform;
-      const jid = `${ns}:channel:${parsed.channel_id}`;
+      // Normalise legacy mode names → canonical 3-mode vocabulary
+      const modeRaw = String(parsed.listening_mode ?? '');
+      if (modeRaw === 'attentive') {
+        logger.warn({ file, was: modeRaw }, 'channel-config: deprecated mode, treating as "mention"');
+        parsed.listening_mode = 'mention';
+      } else if (modeRaw === 'silent') {
+        logger.warn({ file }, 'channel-config: deprecated mode "silent", treating as "intake"');
+        parsed.listening_mode = 'intake';
+      } else if (!['active', 'mention', 'intake'].includes(modeRaw)) {
+        logger.warn({ file, mode: modeRaw }, 'channel-config: unknown listening_mode, defaulting to "mention"');
+        parsed.listening_mode = 'mention';
+      }
+
+      // Build JID key.
+      // WhatsApp and Signal group JIDs are platform-native and stored in the DB as-is,
+      // so we use channel_id directly as the lookup key.
+      // All other platforms use the namespaced form: {platform}:{workspace}:channel:{id}.
+      let jid: string;
+      if (parsed.platform === 'whatsapp' || parsed.platform === 'signal') {
+        jid = parsed.channel_id;
+      } else {
+        const ns = parsed.workspace ? `${parsed.platform}:${parsed.workspace}` : parsed.platform;
+        jid = `${ns}:channel:${parsed.channel_id}`;
+      }
       configs.set(jid, parsed);
 
-      logger.debug({ jid, floor: parsed.floor, file }, 'channel-config: loaded');
+      logger.debug({ jid, floor: parsed.floor, mode: parsed.listening_mode, file }, 'channel-config: loaded');
     } catch (err) {
       logger.warn({ file, err }, 'channel-config: failed to parse');
     }
@@ -99,6 +139,18 @@ export function getFloorLevel(
 ): 'owner' | 'admin' | 'staff' | 'guest' {
   const config = configs.get(jid);
   return config?.floor ?? 'guest';
+}
+
+/**
+ * Get the listening mode for a channel.
+ * Returns null for unknown channels (caller uses DB requiresTrigger as fallback).
+ */
+export function getListeningMode(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): 'active' | 'mention' | 'intake' | null {
+  const config = configs.get(jid);
+  return config?.listening_mode ?? null;
 }
 
 /**
