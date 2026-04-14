@@ -202,12 +202,30 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         if (groups[chatJid]) {
           // Extract text content from various message types
-          let content =
+          // Strip Unicode directional isolation marks (U+2068 FSI / U+2069 PDI)
+          // that WhatsApp wraps around @mention names — e.g. "@⁨jibot⁩" → "@jibot"
+          const stripMentionMarks = (s: string) => s.replace(/[\u2068\u2069]/g, '');
+          let content = stripMentionMarks(
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
-            '';
+            ''
+          );
+
+          // Translate LID mentions to display names.
+          // WhatsApp @mentions are encoded as @{LID_USER} in message text
+          // (e.g., "@39304034308253" instead of "@jibot"). Replace jibot's
+          // own LID mention so the trigger pattern "@jibot" matches.
+          if (this.sock.user?.lid) {
+            const selfLidUser = this.sock.user.lid.split(':')[0];
+            if (selfLidUser && content.includes('@' + selfLidUser)) {
+              content = content.replace(
+                new RegExp('@' + selfLidUser, 'g'),
+                '@jibot',
+              );
+            }
+          }
 
           // Handle media messages: documents, images, video, audio
           const docMsg = msg.message?.documentMessage ||
