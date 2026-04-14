@@ -154,8 +154,16 @@ export function loadChannelConfigs(
         // Telegram uses tg:{chatId}
         jid = `tg:${cid}`;
       } else if (parsed.platform === 'line') {
-        // LINE uses line:{groupId} or line:dm:{userId}
-        jid = `line:${cid}`;
+        // LINE uses line:{groupId} for groups (IDs start with C/R)
+        // and line:dm:{userId} for DMs (IDs start with U).
+        // If channel_id already has the dm: prefix, pass through.
+        if (cid.startsWith('dm:') || cid.startsWith('line:')) {
+          jid = cid.startsWith('line:') ? cid : `line:${cid}`;
+        } else if (cid.startsWith('U')) {
+          jid = `line:dm:${cid}`;
+        } else {
+          jid = `line:${cid}`;
+        }
       } else {
         // Slack and others: {platform}:{workspace}:channel:{id}
         const ns = parsed.workspace ? `${parsed.platform}:${parsed.workspace}` : parsed.platform;
