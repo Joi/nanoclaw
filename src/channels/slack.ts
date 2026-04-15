@@ -107,7 +107,8 @@ export class SlackChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const channelId = await this.resolveChannelId(jid);
-    const formatted = markdownToSlack(text);
+    const withMentions = this.compactUserMentions(text);
+    const formatted = markdownToSlack(withMentions);
     try {
       await this.app.client.chat.postMessage({
         channel: channelId,
@@ -645,6 +646,65 @@ export class SlackChannel implements Channel {
    * Checks identity index first (registered users get their real name from
    * people page), falls back to Slack API display name for unregistered users.
    */
+
+  /**
+   * Compact display-name mentions (@DisplayName) back to Slack mention syntax (<@UXXXX>).
+   * This is the reverse of expandUserMentions() — it runs on outgoing messages
+   * so the LLM can write @PersonName and it becomes a proper Slack mention.
+   *
+   * Uses the userCache (populated from incoming messages) and identity-index.json
+   * for resolution. Falls back to plain text if no match is found.
+   */
+  private compactUserMentions(text: string): string {
+    // Build reverse map: displayName -> userId (from userCache)
+    const nameToId = new Map<string, string>();
+    for (const [userId, displayName] of this.userCache.entries()) {
+      nameToId.set(displayName.toLowerCase(), userId);
+    }
+
+    // Also load identity index for richer coverage
+    const indexPath = path.join(
+      process.env.HOME || '/Users/jibot',
+      'switchboard', 'ops', 'jibot', 'identity-index.json',
+    );
+    try {
+      const identityIndex: Record<string, { name: string }> = JSON.parse(
+        fs.readFileSync(indexPath, 'utf-8'),
+      );
+      const ns = this.opts.namespace;
+      const prefix = ns ? `slack:${ns}:` : 'slack:';
+      for (const [jid, entry] of Object.entries(identityIndex)) {
+        if (jid.startsWith(prefix) && !jid.includes(':channel:')) {
+          const userId = jid.slice(prefix.length);
+          // Don't overwrite userCache entries (they're fresher)
+          if (!nameToId.has(entry.name.toLowerCase())) {
+            nameToId.set(entry.name.toLowerCase(), userId);
+          }
+        }
+      }
+    } catch {
+      // No identity index available — use userCache only
+    }
+
+    if (nameToId.size === 0) return text;
+
+    // Sort names by length (longest first) to avoid partial matches
+    // e.g., "Jon Phillips" should match before "Jon"
+    const sortedNames = [...nameToId.entries()].sort(
+      (a, b) => b[0].length - a[0].length,
+    );
+
+    let result = text;
+    for (const [nameLower, userId] of sortedNames) {
+      // Match @Name (case-insensitive, word boundary after name)
+      const escaped = nameLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`@(${escaped})(?=\\s|[.,!?;:\\)]|$)`, 'gi');
+      result = result.replace(pattern, `<@${userId}>`);
+    }
+
+    return result;
+  }
+
   private async expandUserMentions(text: string): Promise<string> {
     const mentionPattern = /<@(U[A-Z0-9]+)>/g;
     const mentions = [...text.matchAll(mentionPattern)];
