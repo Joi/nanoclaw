@@ -39,6 +39,9 @@ const envConfig = readEnvFile([
   'EMAIL_CHANNEL_ENABLED',
   'EMAIL_INTAKE_ACCOUNT',
   'GOG_KEYRING_PASSWORD',
+  'AGENT_API_PORT',
+  'AGENT_API_TOKEN',
+  'MAIN_GROUP_FOLDER',
 ]);
 
 export const ASSISTANT_NAME =
@@ -196,14 +199,14 @@ export const BOOKMARK_RELAY_URL =
 
 // Voice API configuration
 export const AGENT_API_PORT = parseInt(
-  process.env.AGENT_API_PORT || '3200',
+  process.env.AGENT_API_PORT || envConfig.AGENT_API_PORT || '3200',
   10,
 );
-export const AGENT_API_TOKEN = process.env.AGENT_API_TOKEN || '';
+export const AGENT_API_TOKEN = process.env.AGENT_API_TOKEN || envConfig.AGENT_API_TOKEN || '';
 
 // Main group folder (used by voice API, email routing, etc.)
 export const MAIN_GROUP_FOLDER =
-  process.env.MAIN_GROUP_FOLDER || '';
+  process.env.MAIN_GROUP_FOLDER || envConfig.MAIN_GROUP_FOLDER || '';
 
 // Third Slack workspace (GIDC)
 export const SLACK_3_BOT_TOKEN = process.env.SLACK_3_BOT_TOKEN || envConfig.SLACK_3_BOT_TOKEN || '';

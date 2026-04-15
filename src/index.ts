@@ -1022,6 +1022,10 @@ async function main(): Promise<void> {
     logger.warn({ err }, 'Failed to start credential proxy — containers may lack API access');
   }
 
+  // Start Agent API server (HTTP endpoint for Zoom bot and other external callers)
+  const { startAgentApi } = await import('./agent-api.js');
+  startAgentApi();
+
   // Reload channel configs periodically (every 5 minutes) in case configs change via Syncthing
   setInterval(() => {
     channelConfigs = loadChannelConfigs(CHANNEL_CONFIGS_DIR);
