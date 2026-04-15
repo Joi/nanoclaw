@@ -147,6 +147,60 @@ export function startIpcWatcher(deps: IpcDeps): void {
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
+
+      // Process reminders from this group's IPC directory
+      try {
+        if (fs.existsSync(path.join(ipcBaseDir, sourceGroup, 'reminders'))) {
+          const remindersDir = path.join(ipcBaseDir, sourceGroup, 'reminders');
+          const reminderFiles = fs
+            .readdirSync(remindersDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of reminderFiles) {
+            const filePath = path.join(remindersDir, file);
+            try {
+              // Check reminders access for this group
+              const hasAccess = Object.values(registeredGroups).some(
+                (g) => g.folder === sourceGroup && g.remindersAccess,
+              );
+              if (!hasAccess && !isMain) {
+                logger.warn(
+                  { sourceGroup },
+                  'Reminder IPC blocked: no reminders access',
+                );
+              } else {
+                const { processRemindersIpc } = await import(
+                  './reminders.js'
+                );
+                const result = processRemindersIpc(filePath, sourceGroup);
+                logger.info(
+                  {
+                    sourceGroup,
+                    result: result.error ? 'error' : 'ok',
+                  },
+                  'Processed reminder IPC',
+                );
+              }
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC reminder',
+              );
+              const errorDir = path.join(ipcBaseDir, 'errors');
+              fs.mkdirSync(errorDir, { recursive: true });
+              fs.renameSync(
+                filePath,
+                path.join(errorDir, `${sourceGroup}-${file}`),
+              );
+            }
+          }
+        }
+      } catch (err) {
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC reminders directory',
+        );
+      }
     }
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);

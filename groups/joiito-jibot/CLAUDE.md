@@ -68,3 +68,25 @@ Here's what I can help with in this channel:
 - Cite sources when referencing knowledge base content
 - If uncertain, say so rather than guessing
 - Keep Slack messages brief; use threading for longer content
+
+## Learned Facts
+
+
+
+### 2026-04-16
+- Dustin D'Amour (`wizcraker`, U6HB2SWQG) — original #joiito community member from ~2003 Freenode era; rejoined the group after a long absence
+- jibot's intake/triage workflow: new people are queued as intake files in IPC for Joi's triage run; once approved, promoted to `jibrain/atlas/people/` entries
+- jibot uses tier-based channel access: guest tier for public channels (no private data sources), owner tier for private DM sessions (reminders, calendar, email mounted)
+- jibot acknowledges statelessness explicitly to users: "I have no memory of [past events]"; reconstructs context entirely from jibrain each session
+- Slack user ID mappings (handle→ID) stored locally on jibotmac only; used purely for formatting `<@USERID>` mentions; do not leave the machine or go to third parties
+- Feature request queued: use ✅ reactions for simple acknowledgements instead of text replies to reduce channel noise
+
+- jibot originated in 2003 as an IRC bot on #joiito channel (Freenode), created by Victor Ruiz in Python; evolved through IRC → Slack → Signal and basic scripts → OpenClaw (GPT) → NanoClaw (Claude)
+- jibot's mission: "communities are stronger when members know about each other" — community members teach it facts via `?learn` commands
+- jibrain is jibot's file-based knowledge base; jibot is stateless and reconstructs context from jibrain each session
+- jibot runs on jibotmac (Mac Mini M4 Pro, 64GB RAM, 7.3 TiB) via Docker/Colima; operates with tier-based access control (guest tier for public channels, owner tier for private sessions)
+- Jon Phillips (`rejon`, U09HCAHLSJ0) — works at intersection of open source, crypto, art, distribution; Creative Commons contributor; connected to Remilia/Chinese web culture NFT scene; runs Fabricatorz Foundation; domain: rejon.org
+- Thomas Vander Wal (`vanderwal`, U030CF0RM) — information architect; coined "folksonomy" (2004); originated "Personal InfoCloud" and "Model of Attraction" framework; Principal at InfoCloud Solutions
+- Daniel Schildt (`d2s`, U0308BM5X) — front-end developer; blogs at notes.autiomaa.org on privacy, JavaScript, tech ethics; original #joiito IRC community member
+- Dustin D'Amour (`wizcraker`, U6HB2SWQG) — original #joiito community member from ~2003 Freenode era
+- Madars Virza (`madars`, UMRQ077T4) — cryptographer, Chief Scientist at Radius Technology Systems (Jan 2025–present); PhD from MIT (Ron Rivest advisor) on succinct zero-knowledge proofs; former MIT Research Scientist (2017–2025); worked on "Humanizing AI in Law" project with Joi on algorithmic risk assessment in criminal justice

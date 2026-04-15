@@ -314,3 +314,10 @@ Still looping. Still not responding.
 2026-03-13 07:59:08,971 [INFO] Monitoring chat -5212847014 for bots: {'fredforever_bot'}
 2026-03-13 07:59:08,971 [INFO] Mention rewrites: {'@joiitobot': '@jibot'}
 2026-03-13 07:59:08,971 [INFO] Relay running. Waiting for messages...
+2026-04-14 04:10:15,523 [INFO] Connecting to 91.108.56.158:443/TcpFull...
+2026-04-14 04:10:25,446 [WARNING] Attempt 1 at connecting failed: TimeoutError: 
+2026-04-14 04:10:26,498 [INFO] Connection to 91.108.56.158:443/TcpFull complete!
+2026-04-14 04:10:27,312 [INFO] Connected as Joi (@joiito, id=2017226080)
+2026-04-14 04:10:27,312 [INFO] Monitoring chat -5212847014 for bots: {'fredforever_bot'}
+2026-04-14 04:10:27,313 [INFO] Mention rewrites: {'@joiitobot': '@jibot'}
+2026-04-14 04:10:27,315 [INFO] Relay running. Waiting for messages...

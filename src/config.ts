@@ -195,11 +195,11 @@ export const BOOKMARK_RELAY_URL =
   process.env.BOOKMARK_RELAY_URL || 'http://localhost:3131';
 
 // Voice API configuration
-export const VOICE_API_PORT = parseInt(
-  process.env.VOICE_API_PORT || '3200',
+export const AGENT_API_PORT = parseInt(
+  process.env.AGENT_API_PORT || '3200',
   10,
 );
-export const VOICE_API_TOKEN = process.env.VOICE_API_TOKEN || '';
+export const AGENT_API_TOKEN = process.env.AGENT_API_TOKEN || '';
 
 // Main group folder (used by voice API, email routing, etc.)
 export const MAIN_GROUP_FOLDER =

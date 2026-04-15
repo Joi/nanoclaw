@@ -1,11 +1,11 @@
 /**
- * Voice API server for NanoClaw.
+ * Agent API server for NanoClaw.
  * Exposes an HTTP endpoint so the iOS voice bridge can execute
  * tool calls through NanoClaw's container agents.
  */
 import http from 'http';
 
-import { ASSISTANT_NAME, MAIN_GROUP_FOLDER, VOICE_API_PORT, VOICE_API_TOKEN } from './config.js';
+import { ASSISTANT_NAME, MAIN_GROUP_FOLDER, AGENT_API_PORT, AGENT_API_TOKEN } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -20,16 +20,16 @@ import { RegisteredGroup } from './types.js';
 // Voice uses the main group folder (joi-dm) so it has the same CLAUDE.md,
 // workspace, tools, and full main-group capabilities. Session is tracked
 // separately so voice and messaging conversations don't share Claude context.
-const VOICE_SESSION_KEY = 'voice';
+const AGENT_SESSION_KEY = 'agent';
 
 /** Build voice group config, inheriting containerConfig from the registered main group. */
-function buildVoiceGroup(): RegisteredGroup {
+function buildAgentGroup(): RegisteredGroup {
   // Find the registered main group to inherit its containerConfig (mounts, etc.)
   const groups = getAllRegisteredGroups();
   const mainGroup = Object.values(groups).find((g) => g.folder === MAIN_GROUP_FOLDER);
 
   return {
-    name: 'Voice',
+    name: 'Agent',
     folder: MAIN_GROUP_FOLDER,
     trigger: `@${ASSISTANT_NAME}`,
     added_at: new Date().toISOString(),
@@ -44,11 +44,11 @@ function buildVoiceGroup(): RegisteredGroup {
 const DEFAULT_TIMEOUT = 300_000; // 5 minutes
 const MIN_TIMEOUT = 120_000; // 2 minutes — cold starts need at least this
 
-let voiceSessionId: string | undefined;
+let agentSessionId: string | undefined;
 
 /** Load persisted voice session from DB on startup. */
-function loadVoiceSession(): void {
-  voiceSessionId = getSession(VOICE_SESSION_KEY) || undefined;
+function loadAgentSession(): void {
+  agentSessionId = getSession(AGENT_SESSION_KEY) || undefined;
 }
 
 interface RunRequestBody {
@@ -103,7 +103,7 @@ async function handleRun(body: RunRequestBody): Promise<{
   let agentError: string | undefined;
 
   try {
-    const voiceGroup = buildVoiceGroup();
+    const voiceGroup = buildAgentGroup();
 
     // Promise that resolves on first streaming result (or error)
     const firstResultPromise = new Promise<{ result: string | null; error?: string }>((resolve) => {
@@ -111,7 +111,7 @@ async function handleRun(body: RunRequestBody): Promise<{
       const timer = setTimeout(() => {
         if (!resolved) {
           resolved = true;
-          resolve({ result: firstResult, error: 'Voice API timeout' });
+          resolve({ result: firstResult, error: 'Agent API timeout' });
         }
       }, timeoutMs);
 
@@ -119,7 +119,7 @@ async function handleRun(body: RunRequestBody): Promise<{
         voiceGroup,
         {
           prompt,
-          sessionId: voiceSessionId,
+          sessionId: agentSessionId,
           groupFolder: MAIN_GROUP_FOLDER,
           chatJid: 'voice:session',
           isMain: true,
@@ -133,8 +133,8 @@ async function handleRun(body: RunRequestBody): Promise<{
         },
         async (output: ContainerOutput) => {
           if (output.newSessionId) {
-            voiceSessionId = output.newSessionId;
-            setSession(VOICE_SESSION_KEY, output.newSessionId);
+            agentSessionId = output.newSessionId;
+            setSession(AGENT_SESSION_KEY, output.newSessionId);
           }
           if (output.status === 'error') {
             agentError = output.error || 'Agent error';
@@ -180,7 +180,7 @@ async function handleRun(body: RunRequestBody): Promise<{
   } catch (err) {
     const durationMs = Date.now() - start;
     const message = err instanceof Error ? err.message : String(err);
-    logger.error({ err }, 'Voice API run error');
+    logger.error({ err }, 'Agent API run error');
     return { success: false, result: firstResult, durationMs, error: message };
   }
 }
@@ -213,11 +213,11 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown): void
   res.end(body);
 }
 
-export function startVoiceApi(): http.Server {
-  loadVoiceSession();
+export function startAgentApi(): http.Server {
+  loadAgentSession();
 
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url || '/', `http://localhost:${VOICE_API_PORT}`);
+    const url = new URL(req.url || '/', `http://localhost:${AGENT_API_PORT}`);
 
     // Health check (no auth required)
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -228,7 +228,7 @@ export function startVoiceApi(): http.Server {
     // Auth check for all other endpoints
     const authHeader = req.headers.authorization || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-    if (token !== VOICE_API_TOKEN) {
+    if (token !== AGENT_API_TOKEN) {
       sendJson(res, 401, { error: 'Unauthorized' });
       return;
     }
@@ -242,7 +242,7 @@ export function startVoiceApi(): http.Server {
         sendJson(res, 200, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.error({ err }, 'Voice API request error');
+        logger.error({ err }, 'Agent API request error');
         sendJson(res, 400, { error: message });
       }
       return;
@@ -251,8 +251,8 @@ export function startVoiceApi(): http.Server {
     sendJson(res, 404, { error: 'Not found' });
   });
 
-  server.listen(VOICE_API_PORT, () => {
-    logger.info({ port: VOICE_API_PORT }, 'Voice API server started');
+  server.listen(AGENT_API_PORT, () => {
+    logger.info({ port: AGENT_API_PORT }, 'Agent API server started');
   });
 
   return server;

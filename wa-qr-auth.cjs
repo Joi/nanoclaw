@@ -1,9 +1,24 @@
 const { makeWASocket, Browsers, DisconnectReason, makeCacheableSignalKeyStore, useMultiFileAuthState } = require("@whiskeysockets/baileys");
 const pino = require("pino");
 const fs = require("fs");
+const https = require("https");
 
 const logger = pino({ level: "warn" });
 let attempt = 0;
+
+const WA_VERSION_URL = 'https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json';
+
+function fetchWaVersion() {
+  return new Promise((resolve) => {
+    https.get(WA_VERSION_URL, { timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data).version); } catch { resolve(undefined); }
+      });
+    }).on('error', () => resolve(undefined));
+  });
+}
 
 async function connect() {
   attempt++;
@@ -14,12 +29,19 @@ async function connect() {
     process.exit(0);
   }
 
+  // Fetch current WhatsApp Web version so the server doesn't reject us (405)
+  const version = await fetchWaVersion();
+  if (version) {
+    console.log(`Using WA version: ${version.join('.')}`);
+  }
+
   console.log(`[attempt ${attempt}] Connecting (QR mode)...`);
   const sock = makeWASocket({
     auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
-    printQRInTerminal: false,
+    printQRInTerminal: true,
     logger,
     browser: Browsers.macOS("Chrome"),
+    ...(version && { version }),
   });
 
   sock.ev.on("connection.update", (update) => {
@@ -27,7 +49,7 @@ async function connect() {
 
     if (qr) {
       fs.writeFileSync("./store/qr-data.txt", qr);
-      console.log("QR_READY (saved to store/qr-data.txt)");
+      console.log("\nScan the QR code above with jibot's WhatsApp > Linked Devices > Link a Device\n");
     }
 
     if (connection === "open") {
