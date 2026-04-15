@@ -5,7 +5,7 @@
  */
 import http from 'http';
 
-import { ASSISTANT_NAME, MAIN_GROUP_FOLDER, AGENT_API_PORT, AGENT_API_TOKEN } from './config.js';
+import { ASSISTANT_NAME, MAIN_GROUP_FOLDER, AGENT_API_PORT, AGENT_API_TOKEN, ZOOM_ORCHESTRATOR_URL } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -244,6 +244,36 @@ export function startAgentApi(): http.Server {
         const message = err instanceof Error ? err.message : String(err);
         logger.error({ err }, 'Agent API request error');
         sendJson(res, 400, { error: message });
+      }
+      return;
+    }
+
+
+    // POST /api/join — forward join request to Zoom bot orchestrator on Fly.io
+    if (req.method === 'POST' && url.pathname === '/api/join') {
+      try {
+        const rawBody = await readBody(req);
+        const body = JSON.parse(rawBody);
+
+        const orchestratorUrl = ZOOM_ORCHESTRATOR_URL;
+        if (!orchestratorUrl) {
+          sendJson(res, 503, { error: 'ZOOM_ORCHESTRATOR_URL not configured' });
+          return;
+        }
+
+        // Forward to orchestrator
+        const response = await fetch(`${orchestratorUrl}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const result = await response.json();
+        sendJson(res, response.status, result);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error({ err }, 'Agent API /api/join error');
+        sendJson(res, 500, { error: message });
       }
       return;
     }

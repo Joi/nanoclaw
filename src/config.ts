@@ -41,7 +41,7 @@ const envConfig = readEnvFile([
   'GOG_KEYRING_PASSWORD',
   'AGENT_API_PORT',
   'AGENT_API_TOKEN',
-  'MAIN_GROUP_FOLDER',
+  'MAIN_GROUP_FOLDER',  'ZOOM_ORCHESTRATOR_URL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -225,3 +225,5 @@ export const CONFIDENTIAL_ROOT =
   process.env.CONFIDENTIAL_ROOT ||
   envConfig.CONFIDENTIAL_ROOT ||
   path.join(os.homedir(), 'switchboard', 'confidential');
+
+export const ZOOM_ORCHESTRATOR_URL = process.env.ZOOM_ORCHESTRATOR_URL || envConfig.ZOOM_ORCHESTRATOR_URL || '';
