@@ -62,3 +62,4 @@ scripts/telegram-relay/relay.log
 # Runtime database (root-level copy)
 nanoclaw.db
 .env.backup*
+audit/
