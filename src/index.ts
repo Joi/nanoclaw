@@ -128,6 +128,32 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+// ── jibrain intake batching (Layer 1) ─────────────────────────────────
+// Buffer messages per {channel:sender} and flush after a quiet window.
+// Collapses multi-message bursts into a single intake file.
+const JIBRAIN_HOOK = path.join(process.env.HOME || '/Users/jibot', 'scripts/nanoclaw-jibrain-hook.sh');
+const QUIET_MS = 3 * 60 * 1000; // 3 min quiet window
+const jibrainBatch = new Map<string, { msgs: string[]; timer: ReturnType<typeof setTimeout> }>();
+
+function queueJibrainIntake(chatJid: string, sender: string, content: string): void {
+  const key = `${chatJid}:${sender}`;
+  let batch = jibrainBatch.get(key);
+  if (!batch) {
+    batch = { msgs: [], timer: null as any };
+    jibrainBatch.set(key, batch);
+  }
+  batch.msgs.push(content);
+  clearTimeout(batch.timer);
+  batch.timer = setTimeout(() => {
+    const merged = batch!.msgs.join('\n\n---\n\n');
+    const ch = chatJid.split(':')[0] || 'unknown';
+    execFile('/bin/bash', [
+      JIBRAIN_HOOK, 'process', ch, sender, merged,
+    ], (err) => { if (err) logger.warn({ err }, 'jibrain hook failed'); });
+    jibrainBatch.delete(key);
+  }, QUIET_MS);
+}
+
 
 const onecli = new OneCLI({ url: ONECLI_URL });
 
@@ -1230,11 +1256,7 @@ async function main(): Promise<void> {
         ? jbChCfg.confidential_intake
         : jbChCfg?.listening_mode === 'silent' && (jbChCfg?.domains?.length ?? 0) > 0;
       if (!wantsConfIntake && !msg.is_from_me && !msg.is_bot_message && msg.content.length >= 20) {
-        const ch = chatJid.split(':')[0] || 'unknown';
-        execFile('/bin/bash', [
-          path.join(process.env.HOME || '/Users/jibot', 'scripts/nanoclaw-jibrain-hook.sh'),
-          'process', ch, msg.sender, msg.content,
-        ], (err) => { if (err) logger.warn({ err }, 'jibrain hook failed'); });
+        queueJibrainIntake(chatJid, msg.sender, msg.content);
       }
     },
     onChatMetadata: (
