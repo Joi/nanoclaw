@@ -118,7 +118,7 @@ describe('GIDC intake pipeline wiring in index.ts', () => {
     });
 
     it("calls shouldRunIntake with channelMode and false", () => {
-      expect(indexSource).toContain('shouldRunIntake(group.channelMode, false)');
+      expect(indexSource).toContain("shouldRunIntake(group.channelMode ?? 'listening', false)");
     });
 
     it("calls writeIntakeFile with CONFIDENTIAL_ROOT", () => {

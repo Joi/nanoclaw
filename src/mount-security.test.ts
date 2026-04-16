@@ -28,16 +28,16 @@ describe("loadMountAllowlist - integration (reads real ~/.config/nanoclaw/mount-
     expect(allowlist).not.toBeNull();
   });
 
-  it("returns both ~/jibrain and ~/switchboard/confidential roots", () => {
+  it("returns ~/jibrain and ~/switchboard roots", () => {
     if (allowlist === null) return;
     const paths = allowlist.allowedRoots.map((r) => r.path);
     expect(paths).toContain("~/jibrain");
-    expect(paths).toContain("~/switchboard/confidential");
+    expect(paths).toContain("~/switchboard");
   });
 
-  it("returns exactly 2 allowed roots", () => {
+  it("returns exactly 3 allowed roots", () => {
     if (allowlist === null) return;
-    expect(allowlist.allowedRoots).toHaveLength(2);
+    expect(allowlist.allowedRoots).toHaveLength(3);
   });
 
   it("~/jibrain has allowReadWrite: true", () => {
@@ -47,22 +47,22 @@ describe("loadMountAllowlist - integration (reads real ~/.config/nanoclaw/mount-
     expect(jibrain!.allowReadWrite).toBe(true);
   });
 
-  it("~/switchboard/confidential has allowReadWrite: true", () => {
+  it("~/switchboard has allowReadWrite: true", () => {
     if (allowlist === null) return;
-    const confidential = allowlist.allowedRoots.find(
-      (r) => r.path === "~/switchboard/confidential",
+    const switchboard = allowlist.allowedRoots.find(
+      (r) => r.path === "~/switchboard",
     );
-    expect(confidential).toBeDefined();
-    expect(confidential!.allowReadWrite).toBe(true);
+    expect(switchboard).toBeDefined();
+    expect(switchboard!.allowReadWrite).toBe(true);
   });
 
-  it("~/switchboard/confidential has correct description", () => {
+  it("~/switchboard has correct description", () => {
     if (allowlist === null) return;
-    const confidential = allowlist.allowedRoots.find(
-      (r) => r.path === "~/switchboard/confidential",
+    const switchboard = allowlist.allowedRoots.find(
+      (r) => r.path === "~/switchboard",
     );
-    expect(confidential!.description).toBe(
-      "Confidential workstream data (GIDC, Sankosh, Bhutan)",
+    expect(switchboard!.description).toBe(
+      "Switchboard data (email tracker, agents, ops) — email-tracker.json lives here",
     );
   });
 });
