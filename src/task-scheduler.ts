@@ -109,9 +109,10 @@ async function runTask(
   );
 
   const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
-    (g) => g.folder === task.group_folder,
-  );
+  // Primary: exact match by chat_jid (unique, deterministic).
+  // Fallback: folder match for backward compat.
+  const group = groups[task.chat_jid]
+    ?? Object.values(groups).find((g) => g.folder === task.group_folder);
 
   if (!group) {
     logger.error(
