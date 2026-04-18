@@ -147,8 +147,13 @@ function queueJibrainIntake(chatJid: string, sender: string, content: string): v
   batch.timer = setTimeout(() => {
     const merged = batch!.msgs.join('\n\n---\n\n');
     const ch = chatJid.split(':')[0] || 'unknown';
+    // joi-sd4: pass channel_slug + capture_mode so the hook can route
+    // lurker channels to a daily digest file instead of per-message files.
+    const group = registeredGroups[chatJid];
+    const channelSlug = group?.folder || 'unknown';
+    const captureMode = group?.captureMode || 'standalone';
     execFile('/bin/bash', [
-      JIBRAIN_HOOK, 'process', ch, sender, merged,
+      JIBRAIN_HOOK, 'process', ch, sender, merged, channelSlug, captureMode,
     ], (err) => { if (err) logger.warn({ err }, 'jibrain hook failed'); });
     jibrainBatch.delete(key);
   }, QUIET_MS);
@@ -966,6 +971,7 @@ function syncYamlToDb(): void {
         calendarAccess: access.calendar || undefined,
         fileServingAccess: access.file_serving || undefined,
         intakeAccess: access.intake || undefined,
+        captureMode: (config as any).capture_mode === 'digest' ? 'digest' : undefined,
       };
       setRegisteredGroup(jid, group);
       registeredGroups[jid] = group;
@@ -985,6 +991,7 @@ function syncYamlToDb(): void {
         calendarAccess: access.calendar || undefined,
         fileServingAccess: access.file_serving || undefined,
         intakeAccess: access.intake || undefined,
+        captureMode: (config as any).capture_mode === 'digest' ? 'digest' : undefined,
       };
       try {
         setRegisteredGroup(jid, group);

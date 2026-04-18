@@ -45,6 +45,7 @@ export interface RegisteredGroup {
   fileServingAccess?: boolean;
   intakeAccess?: boolean;
   channelMode?: 'listening' | 'available';
+  captureMode?: 'standalone' | 'digest';
   remindersAccess?: boolean;
   bookmarksAccess?: boolean;
   emailAccess?: boolean;

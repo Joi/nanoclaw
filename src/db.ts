@@ -201,6 +201,11 @@ function createSchema(database: Database.Database): void {
       database.exec(`ALTER TABLE registered_groups ADD COLUMN ${col} INTEGER DEFAULT 0`);
     } catch { /* column already exists */ }
   }
+
+  // Non-boolean capture_mode column (joi-sd4 — standalone | digest)
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN capture_mode TEXT DEFAULT 'standalone'`);
+  } catch { /* column already exists */ }
 }
 
 export function initDatabase(): void {
@@ -701,8 +706,9 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
      (jid, name, folder, trigger_pattern, added_at, container_config,
       requires_trigger, log_triggered_only, is_main,
       reminders_access, bookmarks_access, email_access,
-      calendar_access, file_serving_access, intake_access)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      calendar_access, file_serving_access, intake_access,
+      capture_mode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -719,6 +725,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.calendarAccess ? 1 : 0,
     group.fileServingAccess ? 1 : 0,
     group.intakeAccess ? 1 : 0,
+    group.captureMode ?? 'standalone',
   );
 }
 
@@ -739,6 +746,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     calendar_access: number | null;
     file_serving_access: number | null;
     intake_access: number | null;
+    capture_mode: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -767,6 +775,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       calendarAccess: row.calendar_access === 1 ? true : undefined,
       fileServingAccess: row.file_serving_access === 1 ? true : undefined,
       intakeAccess: row.intake_access === 1 ? true : undefined,
+      captureMode: row.capture_mode === 'digest' ? 'digest' : undefined,
     };
   }
   return result;

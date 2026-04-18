@@ -47,6 +47,14 @@ export interface ChannelConfig {
 
   /** Legacy field, still accepted in YAML. Use access.intake instead. */
   confidential_intake?: boolean;
+
+  /**
+   * Capture mode controls per-message file emission:
+   *   standalone (default) — one intake .md file per message batch
+   *   digest                — append to a single daily digest file for this channel
+   * Use digest for lurker channels where per-message files create noise.
+   */
+  capture_mode?: 'standalone' | 'digest';
   members: Record<string, { tier: string; person_ref?: string }>;
 }
 
