@@ -130,6 +130,44 @@ function buildVolumeMounts(
     }
   }
 
+  // Google Workspace (gog) tools — mount binary, wrapper, and OAuth token dir
+  // so agents can query calendar/gmail/drive/etc. from inside the container.
+  // Conditional on ~/tools/ layout existing; gracefully skipped on machines
+  // that have not set up gog. The wrapper script (scripts/gog-wrapper.sh)
+  // is mounted at /usr/local/bin/gog so agents can invoke \`gog …\` directly;
+  // the wrapper handles in-container env (XDG_CONFIG_HOME, SSL_CERT_FILE,
+  // keyring password) and execs the mounted Linux binary. OAuth tokens are
+  // read-only to limit blast radius if a sandbox is compromised.
+  const gogHostDir = path.join(process.env.HOME || "", "tools");
+  const gogLinuxBin = path.join(gogHostDir, "gog-linux");
+  if (fs.existsSync(gogLinuxBin)) {
+    // Linux binary that does the actual Google API work
+    mounts.push({
+      hostPath: gogLinuxBin,
+      containerPath: "/usr/local/bin/gog-linux",
+      readonly: true,
+    });
+    // Wrapper at the name agents expect (\`gog\`)
+    const gogWrapper = path.join(process.cwd(), "scripts", "gog-wrapper.sh");
+    if (fs.existsSync(gogWrapper)) {
+      mounts.push({
+        hostPath: gogWrapper,
+        containerPath: "/usr/local/bin/gog",
+        readonly: true,
+      });
+    }
+    // OAuth token dir. Wrapper sets XDG_CONFIG_HOME=/workspace/.config,
+    // so gog looks for tokens under /workspace/.config/gogcli/.
+    const gogTokenDir = path.join(gogHostDir, "gogcli");
+    if (fs.existsSync(gogTokenDir)) {
+      mounts.push({
+        hostPath: gogTokenDir,
+        containerPath: "/workspace/.config/gogcli",
+        readonly: true,
+      });
+    }
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
