@@ -659,8 +659,16 @@ export class SlackChannel implements Channel {
     // Build reverse map: displayName -> userId (from userCache)
     const nameToId = new Map<string, string>();
     for (const [userId, displayName] of this.userCache.entries()) {
-      nameToId.set(displayName.toLowerCase(), userId);
+      const key = displayName.toLowerCase().trim();
+      if (key) nameToId.set(key, userId);
     }
+
+    const addAlias = (key: string | undefined, userId: string) => {
+      if (!key) return;
+      const k = key.toLowerCase().trim();
+      if (!k) return;
+      if (!nameToId.has(k)) nameToId.set(k, userId);
+    };
 
     // Also load identity index for richer coverage
     const indexPath = path.join(
@@ -668,17 +676,48 @@ export class SlackChannel implements Channel {
       'switchboard', 'ops', 'jibot', 'identity-index.json',
     );
     try {
-      const identityIndex: Record<string, { name: string }> = JSON.parse(
-        fs.readFileSync(indexPath, 'utf-8'),
-      );
+      const identityIndex: Record<string, {
+        name?: string;
+        handle?: string;
+        first_name?: string;
+        last_name?: string;
+        display_name?: string;
+      }> = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
       const ns = this.opts.namespace;
       const prefix = ns ? `slack:${ns}:` : 'slack:';
+
+      // Pre-pass: count first-name occurrences across this namespace so we can
+      // skip adding first-name-only aliases for users whose first name collides.
+      const firstNameCounts = new Map<string, number>();
       for (const [jid, entry] of Object.entries(identityIndex)) {
-        if (jid.startsWith(prefix) && !jid.includes(':channel:')) {
-          const userId = jid.slice(prefix.length);
-          // Don't overwrite userCache entries (they're fresher)
-          if (!nameToId.has(entry.name.toLowerCase())) {
-            nameToId.set(entry.name.toLowerCase(), userId);
+        if (!jid.startsWith(prefix) || jid.includes(':channel:')) continue;
+        const fn = (entry as { first_name?: string })?.first_name;
+        if (!fn) continue;
+        const k = fn.toLowerCase().trim();
+        if (k) firstNameCounts.set(k, (firstNameCounts.get(k) ?? 0) + 1);
+      }
+
+      for (const [jid, entry] of Object.entries(identityIndex)) {
+        if (!jid.startsWith(prefix) || jid.includes(':channel:')) continue;
+        const userId = jid.slice(prefix.length);
+        const e = entry as {
+          name?: string;
+          handle?: string;
+          first_name?: string;
+          last_name?: string;
+          display_name?: string;
+        };
+
+        addAlias(e.name, userId);                       // e.g. "seanbonner"
+        addAlias(e.handle, userId);                     // e.g. "sean"
+        addAlias(e.display_name, userId);               // may be empty
+        if (e.first_name && e.last_name) {
+          addAlias(`${e.first_name} ${e.last_name}`, userId); // "sean bonner"
+        }
+        if (e.first_name) {
+          const fnKey = e.first_name.toLowerCase().trim();
+          if (fnKey && firstNameCounts.get(fnKey) === 1) {
+            addAlias(e.first_name, userId);             // "sean" if unique
           }
         }
       }

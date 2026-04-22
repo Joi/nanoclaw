@@ -45,6 +45,9 @@ const WORKSPACES: WorkspaceConfig[] = [
 
 interface IdentityEntry {
   name: string;
+  handle?: string;
+  first_name?: string;
+  last_name?: string;
   tier: string;
   domains: string[];
   display_name: string;
@@ -126,6 +129,11 @@ async function processWorkspace(
         display_name: user.profile?.display_name ?? '',
         email: user.profile?.email ?? '',
       };
+
+      // Richer name aliases so @Handle, @First Last, @First (unambiguous) resolve too.
+      if (user.name) entry.handle = user.name;
+      if (user.profile?.first_name) entry.first_name = user.profile.first_name;
+      if (user.profile?.last_name) entry.last_name = user.profile.last_name;
 
       if (key in index) {
         updated++;

@@ -18,15 +18,27 @@ const mockFilesUploadV2 = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true 
 // Hoisted mock for fs.createReadStream
 const mockCreateReadStream = vi.hoisted(() => vi.fn().mockReturnValue({}));
 
+// Hoisted mock for fs.readFileSync (used by compactUserMentions / expandUserMentions
+// to load identity-index.json). Default: no index file (readFileSync throws).
+const mockReadFileSync = vi.hoisted(() =>
+  vi.fn((..._args: unknown[]): string => {
+    throw new Error('ENOENT');
+  }),
+);
+
 vi.mock("fs", () => ({
   default: {
     createReadStream: mockCreateReadStream,
     mkdirSync: vi.fn(),
     writeFileSync: vi.fn(),
+    readFileSync: mockReadFileSync,
+    appendFileSync: vi.fn(),
   },
   createReadStream: mockCreateReadStream,
   mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
+  readFileSync: mockReadFileSync,
+  appendFileSync: vi.fn(),
 }));
 
 
@@ -466,6 +478,151 @@ describe('SlackChannel', () => {
       await expect(
         channel.sendMessage('slack:UABC123', 'Hello'),
       ).rejects.toThrow('Failed to open DM with UABC123');
+    });
+  });
+
+  // --- compactUserMentions (name → user ID resolution) ---
+
+  describe('compactUserMentions via sendMessage', () => {
+    const sampleIndex = {
+      // Sean: handle + first+last + no display_name, unique first name
+      'slack:joiito:UMS3X3U4S': {
+        name: 'seanbonner',
+        handle: 'sean',
+        first_name: 'Sean',
+        last_name: 'Bonner',
+        tier: 'guest',
+        domains: [],
+        display_name: '',
+        email: 'Sean@seanbonner.com',
+      },
+      // Jane: also has a display_name
+      'slack:joiito:UJANE001': {
+        name: 'janedoe',
+        handle: 'jane',
+        first_name: 'Jane',
+        last_name: 'Doe',
+        tier: 'guest',
+        domains: [],
+        display_name: 'jane',
+        email: 'jane@example.com',
+      },
+      // Two Marks → first-name "mark" is ambiguous
+      'slack:joiito:UMARK001': {
+        name: 'markone',
+        first_name: 'Mark',
+        last_name: 'One',
+        tier: 'guest',
+        domains: [],
+        display_name: '',
+        email: 'mark1@example.com',
+      },
+      'slack:joiito:UMARK002': {
+        name: 'marktwo',
+        first_name: 'Mark',
+        last_name: 'Two',
+        tier: 'guest',
+        domains: [],
+        display_name: '',
+        email: 'mark2@example.com',
+      },
+      // Entry in a different namespace — must not leak into joiito's map
+      'slack:cit:UCIT001': {
+        name: 'citbob',
+        handle: 'bob',
+        first_name: 'Bob',
+        last_name: 'Smith',
+        tier: 'guest',
+        domains: [],
+        display_name: '',
+        email: 'bob@example.com',
+      },
+      // Channel entry in joiito — must be ignored
+      'slack:joiito:channel:CGEN0001': {
+        name: 'general',
+        tier: 'guest',
+        domains: [],
+        display_name: '',
+        email: '',
+      },
+      // Email-keyed entry — must be ignored
+      'other@example.com': {
+        name: 'Someone Else',
+        tier: 'friend',
+        domains: [],
+        display_name: '',
+        email: 'other@example.com',
+      },
+    };
+
+    beforeEach(() => {
+      mockReadFileSync.mockReturnValue(JSON.stringify(sampleIndex));
+    });
+
+    async function sentText(text: string, namespace = 'joiito'): Promise<string> {
+      const channel = new SlackChannel(createOpts({ namespace }));
+      const app = currentApp();
+      await channel.connect();
+      await channel.sendMessage(`slack:${namespace}:channel:CTEST001`, text);
+      const call = app.client.chat.postMessage.mock.calls.at(-1)?.[0];
+      return call?.text ?? '';
+    }
+
+    it('resolves @seanbonner (name) to <@UMS3X3U4S>', async () => {
+      const out = await sentText('hey @seanbonner can you look at this');
+      expect(out).toContain('<@UMS3X3U4S>');
+      expect(out).not.toContain('@seanbonner');
+    });
+
+    it('resolves @Sean Bonner (first + last) to <@UMS3X3U4S>', async () => {
+      const out = await sentText('cc @Sean Bonner on this');
+      expect(out).toContain('<@UMS3X3U4S>');
+    });
+
+    it('resolves @Sean (unambiguous first name) to <@UMS3X3U4S>', async () => {
+      const out = await sentText('thanks @Sean!');
+      expect(out).toContain('<@UMS3X3U4S>');
+    });
+
+    it('is case-insensitive on every alias', async () => {
+      const a = await sentText('@SEANBONNER hi');
+      const b = await sentText('@SEAN BONNER hi');
+      const c = await sentText('@sean hi');
+      expect(a).toContain('<@UMS3X3U4S>');
+      expect(b).toContain('<@UMS3X3U4S>');
+      expect(c).toContain('<@UMS3X3U4S>');
+    });
+
+    it('resolves @sean (handle) to <@UMS3X3U4S>', async () => {
+      const out = await sentText('ping @sean');
+      expect(out).toContain('<@UMS3X3U4S>');
+    });
+
+    it('does NOT resolve @Mark (ambiguous first name shared across users)', async () => {
+      const out = await sentText('hi @Mark');
+      expect(out).not.toContain('<@UMARK001>');
+      expect(out).not.toContain('<@UMARK002>');
+      expect(out).toContain('@Mark');
+    });
+
+    it('still resolves @Mark One (full name, unambiguous)', async () => {
+      const out = await sentText('assigning @Mark One');
+      expect(out).toContain('<@UMARK001>');
+    });
+
+    it('ignores entries from other namespaces', async () => {
+      const out = await sentText('@Bob Smith says hi');
+      expect(out).not.toContain('<@UCIT001>');
+    });
+
+    it('resolves cross-namespace when the channel runs in that namespace', async () => {
+      const out = await sentText('@Bob Smith says hi', 'cit');
+      expect(out).toContain('<@UCIT001>');
+    });
+
+    it('leaves unknown names untouched', async () => {
+      const out = await sentText('@NobodyReal ping');
+      expect(out).toContain('@NobodyReal');
     });
   });
 
