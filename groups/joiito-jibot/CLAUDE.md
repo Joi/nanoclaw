@@ -122,6 +122,44 @@ will promote to the atlas.
 
 
 
+
+
+
+
+
+
+### 2026-04-21
+- Seraph (`seraph`, U03G1P5DZ) — new community member; intake queued pending triage
+- Feature request: use ✅ or 👍 reactions for simple acknowledgements instead of text replies to reduce channel noise (queued for Joi's review)
+- jibot's Slack user ID mappings are stored locally on jibotmac only and used purely for formatting `<@USERID>` mentions; handle→ID mappings kept private to that machine
+- Dustin D'Amour (`wizcraker`, U6HB2SWQG) — original #joiito community member from ~2003 Freenode era; rejoined after extended absence
+- Thomas Vander Wal (`vanderwal`, U030CF0RM) — information architect; coined "folksonomy" (2004); originated "Personal InfoCloud" and "Model of Attraction" framework; Principal at InfoCloud Solutions
+- Daniel Schildt (`d2s`, U0308BM5X) — original #joiito IRC community member; front-end developer; blogs at notes.autiomaa.org on privacy, JavaScript, tech ethics
+- Jon Phillips (`rejon`, U09HCAHLSJ0) — works at intersection of open source, crypto, art, distribution; Creative Commons contributor; connected to Remilia/Chinese web culture NFT scene; runs Fabricatorz Foundation; domain: rejon.org
+- jibot originated in 2003 as an IRC bot on #joiito (Freenode), created by Victor Ruiz in Python; evolved through IRC → Slack → Signal and basic scripts → OpenClaw (GPT) → NanoClaw (Claude)
+- jibot's core mission: "communities are stronger when members know about each other" — community members taught it facts via `?learn` commands during IRC era
+- Madars Virza (`madars`, UMRQ077T4) — cryptographer, Chief Scientist at Radius Technology Systems (Jan 2025–present); PhD from MIT (Ron Rivest advisor) on succinct zero-knowledge proofs; former MIT Research Scientist (2017–2025); worked on "Humanizing AI in Law" project with Joi on algorithmic risk assessment in criminal justice
+
+### 2026-04-20
+- Jon Phillips (`rejon`, U09HCAHLSJ0) — domain: rejon.org; co-launched Creative Commons global case studies project; reads Chinese
+- Feature request: use ✅ or 👍 reactions for simple acknowledgements instead of text replies to reduce channel noise (queued for Joi's review)
+- Seraph (`seraph`, U03G1P5DZ) — new community member; intake queued pending triage
+- jibot's Slack user ID mappings are stored locally on jibotmac only and used purely for formatting `<@USERID>` mentions; handle→ID mappings kept private to that machine
+- jibot's stateless Docker containers are spun up per session/channel with no memory across conversations; each instance reconstructs context entirely from jibrain
+- jibot's intake/triage workflow: new people queued as intake files in IPC; Joi runs triage to promote entries to `jibrain/atlas/people/` entries
+- Joi runs a `morning-routine` recipe on Amplifier (personal laptop) daily that syncs reminders, generates daily dashboard/note, copies context to jibot-docs/shared/ for owner-tier DM sessions
+- Owner-tier sessions (private DMs) have private data sources mounted (reminders, calendar, email); guest-tier sessions (public channels like #jibot) run without private data access
+
+### 2026-04-19
+- Feature request: use ✅ reactions for simple acknowledgements instead of text replies to reduce channel noise (queued for Joi's review)
+- Slack user ID mappings are stored locally on jibotmac only and used purely for formatting `<@USERID>` mentions; do not leave the machine or go to third parties
+- jibot runs guest tier (public channels, no private data sources) vs. owner tier (private DM sessions with reminders, calendar, email mounted); Docker containers are session-specific and stateless
+- Daniel Schildt (`d2s`, U0308BM5X) — original #joiito IRC community member; front-end developer; blogs at notes.autiomaa.org on privacy, JavaScript, tech ethics
+- Thomas Vander Wal (`vanderwal`, U030CF0RM) — information architect; coined "folksonomy" (2004); originated "Personal InfoCloud" and "Model of Attraction" framework; Principal at InfoCloud Solutions
+- Jon Phillips (`rejon`, U09HCAHLSJ0) — works at intersection of open source, crypto, art, distribution; Creative Commons contributor; connected to Remilia/Chinese web culture NFT scene; runs Fabricatorz Foundation
+- jibot originated in 2003 as an IRC bot on #joiito (Freenode), created by Victor Ruiz in Python; evolved through IRC → Slack → Signal and basic scripts → OpenClaw (GPT) → NanoClaw (Claude)
+- jibot's intake/triage workflow: new people queued as intake files in IPC for Joi's triage run; once approved, promoted to `jibrain/atlas/people/` entries
+
 ### 2026-04-16
 - Dustin D'Amour (`wizcraker`, U6HB2SWQG) — original #joiito community member from ~2003 Freenode era; rejoined the group after a long absence
 - jibot's intake/triage workflow: new people are queued as intake files in IPC for Joi's triage run; once approved, promoted to `jibrain/atlas/people/` entries
