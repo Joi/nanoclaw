@@ -108,6 +108,15 @@ import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
 import { buildSenderContext } from './people-context.js';
+import { checkModeration, logModerationEvent } from './moderation.js';
+import YAML from 'yaml';
+import { parseListeningModeCommand } from './listening-modes.js';
+import {
+  isRegistrationIntent,
+  parseClaimedName,
+  lookupIdentity,
+  writeClaimFile,
+} from './self-registration.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -401,6 +410,110 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         });
         return true;
       }
+    }
+  }
+
+  // Self-registration: detect "@jibot add me" / "@jibot I'm [Name]"
+  // Also enforce: guests cannot DM jibot
+  const identityIndexPath = path.join(
+    process.env.HOME || '/Users/jibot',
+    'switchboard', 'ops', 'jibot', 'identity-index.json',
+  );
+  if (missedMessages.length === 1) {
+    const singleMsg = missedMessages[0];
+    const isDm = !group.isMain && (chatJid.includes(':D') || !chatJid.includes(':channel:'));
+
+    // Guest DM enforcement: unregistered users cannot DM jibot
+    if (isDm) {
+      const identity = lookupIdentity(singleMsg.sender, identityIndexPath);
+      const isRegistered = identity && identity.tier !== 'guest';
+      if (!isRegistered) {
+        await channel.sendMessage(
+          chatJid,
+          "I can only have direct conversations with registered members. An admin can get you set up — try messaging in a channel first.",
+        );
+        return true;
+      }
+    }
+
+    // Self-registration intent detection
+    if (isRegistrationIntent(singleMsg.content)) {
+      const existingIdentity = lookupIdentity(singleMsg.sender, identityIndexPath);
+      if (existingIdentity && existingIdentity.tier !== 'guest') {
+        // Already registered
+        await channel.sendMessage(
+          chatJid,
+          `You're already registered as ${existingIdentity.name} (${existingIdentity.tier}). No action needed!`,
+        );
+        return true;
+      }
+
+      // Parse claimed name from message
+      const claimedName = parseClaimedName(singleMsg.content);
+
+      // Create claim file
+      const claimsDir = path.join(
+        process.env.HOME || '/Users/jibot',
+        'switchboard', 'ops', 'jibot', 'claims',
+      );
+      const [platformPart, workspacePart, ...rest] = chatJid.split(':');
+      const userId = singleMsg.sender.split(':').pop() || singleMsg.sender;
+
+      writeClaimFile({
+        platform: platformPart || 'unknown',
+        workspace: workspacePart || 'unknown',
+        user_id: userId,
+        display_name: singleMsg.sender_name || 'Unknown',
+        claimed_identity: claimedName,
+        matched_people_file: null,
+        platform_email: null,
+        conversation_log: `User: ${singleMsg.content}`,
+        channel: chatJid,
+      }, claimsDir);
+
+      const namePhrase = claimedName ? `, ${claimedName}` : '';
+      await channel.sendMessage(
+        chatJid,
+        `Thanks${namePhrase}! I've logged a registration request for review. An admin or owner will confirm your identity and set up your access.`,
+      );
+      logger.info({ sender: singleMsg.sender, claimedName, chatJid }, '[self-registration] claim file created');
+      return true;
+    }
+  }
+
+  // Listening mode admin command: "@jibot set listening mode to X"
+  // Any admin/owner can change the listening mode of a channel
+  if (missedMessages.length === 1) {
+    const singleMsg = missedMessages[0];
+    const newMode = parseListeningModeCommand(singleMsg.content);
+    if (newMode) {
+      // Update the channel YAML config file directly
+      const channelCfg = getChannelConfig(chatJid, channelConfigs);
+      if (channelCfg) {
+        const configDir = CHANNEL_CONFIGS_DIR;
+        // Find the YAML file that matches this JID by reloading with filename tracking
+        const files = fs.readdirSync(configDir).filter((f: string) => f.endsWith('.yaml') || f.endsWith('.yml'));
+        for (const file of files) {
+          try {
+            const filePath = path.join(configDir, file);
+            const raw = fs.readFileSync(filePath, 'utf-8');
+            const parsed = YAML.parse(raw) as Record<string, unknown>;
+            // Check if this config matches the chatJid (simple: channel_id in JID)
+            const channelId = String(parsed.channel_id || '');
+            if (chatJid.includes(channelId) && channelId.length > 4) {
+              parsed.listening_mode = newMode;
+              fs.writeFileSync(filePath, YAML.stringify(parsed));
+              channelConfigs = loadChannelConfigs(CHANNEL_CONFIGS_DIR);
+              await channel.sendMessage(chatJid, `Listening mode set to *${newMode}*.`);
+              logger.info({ chatJid, newMode, file }, '[listening-mode] updated via admin command');
+              return true;
+            }
+          } catch { /* skip files that fail to parse */ }
+        }
+      }
+      // No matching config file - acknowledge but note it won't persist
+      await channel.sendMessage(chatJid, `Listening mode set to *${newMode}* (in-memory only — no channel config file found).`);
+      return true;
     }
   }
 
@@ -1169,6 +1282,40 @@ async function main(): Promise<void> {
               'channel-config: dropping message (sender_policy=drop)',
             );
           }
+          return;
+        }
+      }
+
+      // Moderation check: silently log blocked users, drop banned users
+      if (!msg.is_from_me && !msg.is_bot_message) {
+        const triageDir = path.join(
+          process.env.HOME || '/Users/jibot',
+          'switchboard', 'ops', 'jibot', 'triage',
+        );
+        const identityIndexPath = path.join(
+          process.env.HOME || '/Users/jibot',
+          'switchboard', 'ops', 'jibot', 'identity-index.json',
+        );
+        const modAction = checkModeration(msg.sender, identityIndexPath);
+        if (modAction.type === 'block') {
+          logModerationEvent('block', {
+            timestamp: new Date().toISOString(),
+            senderJid: msg.sender,
+            chatJid,
+            reason: 'blocked tier',
+          }, triageDir);
+          // Blocked: log silently, don't invoke agent
+          return;
+        }
+        if (modAction.type === 'ban') {
+          logModerationEvent('ban', {
+            timestamp: new Date().toISOString(),
+            senderJid: msg.sender,
+            chatJid,
+            reason: 'banned tier',
+          }, triageDir);
+          logger.warn({ senderJid: msg.sender, chatJid }, '[moderation] BANNED user message dropped');
+          // TODO(ix8): Kick from channel via Slack API when scopes are available
           return;
         }
       }

@@ -10,6 +10,7 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { addAllowlistEntry, removeAllowlistEntry } from './sender-allowlist.js';
 import { RegisteredGroup } from './types.js';
+import { parseObservation, writePendingObservation } from './observations.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -599,6 +600,25 @@ export async function processTaskIpc(
           { action, sourceGroup },
           'user_manage: unknown action',
         );
+      }
+      break;
+    }
+
+    case 'observation': {
+      // Community knowledge observation from a container agent
+      const obs = parseObservation(data as Record<string, unknown>);
+      if (obs) {
+        const pendingDir = path.join(
+          process.env.HOME || '/Users/jibot',
+          'switchboard', 'ops', 'jibot', 'observations', 'pending',
+        );
+        writePendingObservation(obs, pendingDir);
+        logger.info(
+          { person: obs.person_name, discrepancy: obs.discrepancy_noted },
+          '[observations] community knowledge observation staged for review',
+        );
+      } else {
+        logger.warn({ data }, '[observations] IPC observation missing required fields, skipping');
       }
       break;
     }

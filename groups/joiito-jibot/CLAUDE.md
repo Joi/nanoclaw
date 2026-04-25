@@ -128,6 +128,16 @@ will promote to the atlas.
 
 
 
+
+
+### 2026-04-25
+- Slack user IDs successfully collected for all active members: Jon Phillips (rejon, U09HCAHLSJ0), Thomas Vander Wal (vanderwal, U030CF0RM), Daniel Schildt (d2s, U0308BM5X), Dustin D'Amour (wizcraker, U6HB2SWQG), Seraph (seraph, U03G1P5DZ), Madars Virza (madars, UMRQ077T4)
+- Seraph (U03G1P5DZ) is a new community member; intake file queued for Joi's triage run
+- Dustin D'Amour (wizcraker) has rejoined the #joiito community after extended absence since ~2003 Freenode era; intake file queued for atlas promotion
+- Intake/triage workflow clarification: intake files queue in IPC pending Joi's triage run; approved entries promoted to `jibrain/atlas/people/` entries
+- Thomas Vander Wal, Daniel Schildt, and Dustin D'Amour all have intake files queued pending Joi's triage run for atlas promotion
+- Feature request confirmed and queued: use ✅ or 👍 reactions for simple acknowledgements instead of text replies to reduce channel noise
+
 ### 2026-04-21
 - Seraph (`seraph`, U03G1P5DZ) — new community member; intake queued pending triage
 - Feature request: use ✅ or 👍 reactions for simple acknowledgements instead of text replies to reduce channel noise (queued for Joi's review)

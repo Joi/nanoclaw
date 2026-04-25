@@ -1,6 +1,7 @@
 import { App, LogLevel } from '@slack/bolt';
-import pkg from 'pdf-parse';
-const { PDFParse } = pkg;
+
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import { markdownToSlack } from '../format.js';
@@ -378,41 +379,36 @@ export class SlackChannel implements Channel {
         logger.warn({ file: file.name, err: saveErr }, 'Failed to save attachment to disk');
       }
 
-      if (isPdf) {
-        // PDFs: extract text inline so the agent can read it immediately
+      if (isPdf && savedHostPath) {
+        // PDFs: extract via markitdown — handles complex layouts better than pdf-parse
         try {
-          const parser = new PDFParse({ data: new Uint8Array(buffer), verbosity: 0 });
-          const textResult = await parser.getText();
-          let text = textResult.text.trim();
-          const info = await parser.getInfo();
-          const numpages = info?.total ?? textResult.total ?? 0;
-          await parser.destroy();
+          const execFileAsync = promisify(execFile);
+          const { stdout: mdText } = await execFileAsync(
+            '/Users/jibot/.local/bin/markitdown',
+            [savedHostPath],
+            { maxBuffer: MAX_TEXT_CHARS * 2, timeout: 60_000 },
+          );
+          let text = mdText.trim();
 
           if (text.length === 0) {
-            const savedNote = savedContainerPath ? ` Saved to: ${savedContainerPath}` : '';
-            parts.push(`[Attached: ${file.name} — PDF contains no extractable text (scanned/image PDF).${savedNote}]`);
+            parts.push(`[Attached: ${file.name} — PDF contains no extractable text. Saved to: ${savedHostPath}]`);
             continue;
           }
 
-          // Truncate very long PDFs
           if (text.length > MAX_TEXT_CHARS) {
-            text = text.slice(0, MAX_TEXT_CHARS) + `\n[... truncated, ${numpages} pages total ...]`;
+            text = text.slice(0, MAX_TEXT_CHARS) + '\n[... truncated ...]';
           }
 
           parts.push(
-            `\n--- Content of ${file.name} (${numpages} pages) ---\n` +
+            `\n--- Content of ${file.name} ---\n` +
             text +
             `\n--- End of ${file.name} ---`,
           );
 
-          logger.info(
-            { file: file.name, pages: numpages, textLen: text.length },
-            'Extracted text from PDF attachment',
-          );
+          logger.info({ file: file.name, textLen: text.length }, 'Extracted PDF via markitdown');
         } catch (pdfErr) {
-          logger.warn({ file: file.name, err: pdfErr }, 'PDF text extraction failed');
-          const savedNote = savedContainerPath ? ` Saved to: ${savedContainerPath}` : '';
-          parts.push(`[Attached: ${file.name} — PDF extraction error.${savedNote}]`);
+          logger.warn({ file: file.name, err: pdfErr }, 'PDF extraction via markitdown failed');
+          parts.push(`[Attached: ${file.name} — PDF extraction error. Saved to: ${savedHostPath}]`);
         }
       } else {
         // Non-PDF: note that it was saved and give the container path
