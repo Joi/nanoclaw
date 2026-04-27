@@ -421,7 +421,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
   if (missedMessages.length === 1) {
     const singleMsg = missedMessages[0];
-    const isDm = !group.isMain && (chatJid.includes(':D') || !chatJid.includes(':channel:'));
+    const isDm = !group.isMain && (chatJid.startsWith("line:") ? chatJid.startsWith("line:dm:") : chatJid.startsWith("dc:") ? chatJid.includes(":dm:") : (chatJid.includes(":D") || !chatJid.includes(":channel:")));
 
     // Guest DM enforcement: unregistered users cannot DM jibot
     if (isDm) {
@@ -683,6 +683,9 @@ async function runAgent(
     extraEnv.PERMITTED_QMD_COLLECTIONS = scope.qmdCollections;
     extraEnv.PERMITTED_MOUNT_PATHS = scope.mountPaths;
     extraEnv.PERMITTED_WORKSTREAM_NAMES = scope.workstreamNames;
+  }
+  if (process.env.JIBOT_INTERNAL_SECRET) {
+    extraEnv.JIBOT_INTERNAL_SECRET = process.env.JIBOT_INTERNAL_SECRET;
   }
 
   try {
