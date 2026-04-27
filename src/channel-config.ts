@@ -67,6 +67,7 @@ export const QMD_PORTS: Record<string, number> = {
   'domain-bhutan': 7337,
   'domain-gmc': 7338,
   'domain-wikipedia': 7339,
+  'domain-jp-ai-agent-startup': 7340,
 } as const;
 
 /** Map from confidential/{slug} path to QMD index name */
