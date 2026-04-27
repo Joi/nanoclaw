@@ -28,7 +28,7 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) TRIGGERED: waiting 10s for writes to settle
 sleep 10
 
 # Reindex all indexes that have source data
-for index in public domain-gidc domain-sankosh domain-bhutan domain-gmc crm; do
+for index in public confidential domain-gidc domain-sankosh domain-bhutan domain-gmc crm domain-jp-ai-agent-startup; do
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) REINDEXING: qmd --index $index update" >> "$LOGFILE"
     OUTPUT=$(/opt/homebrew/bin/qmd --index "$index" update 2>&1) || true
     echo "$OUTPUT" | grep -iE "indexed|collection|files|updated|error" >> "$LOGFILE" 2>/dev/null || true
