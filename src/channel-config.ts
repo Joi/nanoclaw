@@ -58,17 +58,30 @@ export interface ChannelConfig {
   members: Record<string, { tier: string; person_ref?: string }>;
 }
 
-/** Port mapping for access-tiered QMD MCP services */
-export const QMD_PORTS: Record<string, number> = {
-  public: 7333,
-  crm: 7334,
-  'domain-gidc': 7335,
-  'domain-sankosh': 7336,
-  'domain-bhutan': 7337,
-  'domain-gmc': 7338,
-  'domain-wikipedia': 7339,
-  'domain-jp-ai-agent-startup': 7340,
-} as const;
+/** Port mapping for access-tiered QMD MCP services.
+ * Base ports (public, crm) are hardcoded.
+ * Domain ports are loaded from ~/.config/qmd/fleet.yaml at startup.
+ * Adding a new domain only requires updating fleet.yaml — no NanoClaw rebuild needed.
+ */
+function loadQmdPorts(): Record<string, number> {
+  const base: Record<string, number> = { public: 7333, crm: 7334 };
+  const fallback: Record<string, number> = {
+    'domain-gidc': 7335, 'domain-sankosh': 7336, 'domain-bhutan': 7337,
+    'domain-gmc': 7338, 'domain-wikipedia': 7339, 'domain-jp-ai-agent-startup': 7340,
+  };
+  try {
+    const fleetPath = path.join(process.env.HOME ?? '/Users/jibot', '.config/qmd/fleet.yaml');
+    const fleet = YAML.parse(fs.readFileSync(fleetPath, 'utf-8')) as
+      { domains?: Record<string, { port: number }> };
+    for (const [name, cfg] of Object.entries(fleet.domains ?? {})) {
+      base[name] = cfg.port;
+    }
+  } catch {
+    Object.assign(base, fallback);
+  }
+  return base;
+}
+export const QMD_PORTS: Record<string, number> = loadQmdPorts();
 
 /** Map from confidential/{slug} path to QMD index name */
 function domainToIndexName(domain: string): string | null {
