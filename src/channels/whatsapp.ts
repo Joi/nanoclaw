@@ -333,7 +333,7 @@ export class WhatsAppChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
+    return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
   }
 
   async disconnect(): Promise<void> {

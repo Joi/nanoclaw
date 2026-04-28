@@ -29,6 +29,9 @@ interface IdentityEntry {
  * Returns true if the JID represents a direct message (no ':channel:' segment).
  */
 export function isDmJid(jid: string): boolean {
+  // Discord: DMs use dc:dm:userId; server channels use dc:guildId:channelId (no ':channel:' either)
+  if (jid.startsWith('dc:')) return jid.includes(':dm:');
+  // WhatsApp / Slack: DMs lack ':channel:'
   return !jid.includes(':channel:');
 }
 

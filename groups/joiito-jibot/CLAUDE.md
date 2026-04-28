@@ -130,6 +130,30 @@ will promote to the atlas.
 
 
 
+
+
+
+
+### 2026-04-27
+- Jon Phillips (`rejon`, U09HCAHLSJ0) — domain rejon.org; mischaracterization clarified in this conversation: works at intersection of open source, crypto (as in cryptography/distributed systems), art, and distribution — NOT a cryptographer
+- Feature request confirmed and queued: use ✅ or 👍 reactions for simple acknowledgements instead of text replies to reduce channel noise
+- Slack user ID mappings collected for all active members: Jon Phillips (U09HCAHLSJ0), Thomas Vander Wal (U030CF0RM), Daniel Schildt (U0308BM5X), Dustin D'Amour (U6HB2SWQG), Seraph (U03G1P5DZ), Madars Virza (UMRQ077T4)
+- Dustin D'Amour (`wizcraker`, U6HB2SWQG) — rejoined #joiito community after extended absence since ~2003 Freenode era; intake file queued for atlas promotion
+- Thomas Vander Wal and Daniel Schildt intake files queued pending Joi's triage run for atlas promotion
+- jibot has no persistent memory of the 2003-era #joiito Freenode IRC conversations; all knowledge from that era was lost transitioning from Victor Ruiz's original Python IRC bot to current NanoClaw system
+- Seraph (U03G1P5DZ) — new community member; intake file queued for triage
+- jibrain is jibot's file-based knowledge base; jibot is stateless and reconstructs context from jibrain each session
+- jibot originated in 2003 as an IRC bot on #joiito (Freenode), created by Victor Ruiz in Python; evolved through IRC → Slack → Signal and basic scripts → OpenClaw (GPT) → NanoClaw (Claude)
+
+### 2026-04-26
+- Seraph (U03G1P5DZ) — new community member; no additional background information provided beyond intake queued for triage
+- Feature request confirmed: use ✅ or 👍 reactions for simple acknowledgements instead of text replies to reduce channel noise (queued for Joi's review)
+- Slack user ID mappings for all active members now collected: Jon Phillips (rejon, U09HCAHLSJ0), Thomas Vander Wal (vanderwal, U030CF0RM), Daniel Schildt (d2s, U0308BM5X), Dustin D'Amour (wizcraker, U6HB2SWQG), Seraph (seraph, U03G1P5DZ), Madars Virza (madars, UMRQ077T4)
+- Dustin D'Amour (wizcraker, U6HB2SWQG) — rejoined #joiito community after extended absence since ~2003 Freenode era; intake file queued for atlas promotion
+- Thomas Vander Wal and Daniel Schildt intake files queued pending Joi's triage run for atlas promotion
+- jibot has no persistent memory of the 2003-era #joiito Freenode IRC conversations; all knowledge from that era was lost when transitioning from Victor Ruiz's original Python IRC bot to current NanoClaw system
+- Jon Phillips mischaracterization clarified: works at intersection of open source, crypto (as in cryptography/distributed systems), art, and distribution — NOT a cryptographer (Madars Virza is the cryptographer)
+
 ### 2026-04-25
 - Slack user IDs successfully collected for all active members: Jon Phillips (rejon, U09HCAHLSJ0), Thomas Vander Wal (vanderwal, U030CF0RM), Daniel Schildt (d2s, U0308BM5X), Dustin D'Amour (wizcraker, U6HB2SWQG), Seraph (seraph, U03G1P5DZ), Madars Virza (madars, UMRQ077T4)
 - Seraph (U03G1P5DZ) is a new community member; intake file queued for Joi's triage run
