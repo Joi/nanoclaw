@@ -3,7 +3,6 @@
 import importlib.util
 import io
 import json
-import os
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -16,6 +15,7 @@ def load_module():
         "send_message",
         Path(__file__).parent.parent / "scripts" / "send-message.py",
     )
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -140,9 +140,7 @@ def test_send_file_as_flag_overrides_display_name(env):
 def test_send_file_missing_file_exits_1(env):
     """Missing file path → exit 1."""
     mod, _ipc_base, tmp = env
-    code, _out = call_send_file(
-        mod, ["bhutan-tea-wa", str(tmp / "nonexistent.pdf")]
-    )
+    code, _out = call_send_file(mod, ["bhutan-tea-wa", str(tmp / "nonexistent.pdf")])
     assert code == 1
 
 
