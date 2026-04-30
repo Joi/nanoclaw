@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import path from 'path';
 
 // Mock logger
 vi.mock('./logger.js', () => ({
@@ -16,17 +17,35 @@ vi.mock('child_process', () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
 }));
 
+// Mock fs.existsSync — store the mock fn so tests can configure it per-case
+const mockExistsSync = vi.fn();
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    default: {
+      ...actual,
+      existsSync: (...args: unknown[]) => mockExistsSync(...args),
+    },
+    existsSync: (...args: unknown[]) => mockExistsSync(...args),
+  };
+});
+
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
   stopContainer,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
+  seccompProfilePath,
+  assertSeccompProfileExists,
 } from './container-runtime.js';
 import { logger } from './logger.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: file exists. Individual tests override as needed.
+  mockExistsSync.mockReturnValue(true);
 });
 
 // --- Pure functions ---
@@ -158,5 +177,56 @@ describe('cleanupOrphans', () => {
       { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
       'Stopped orphaned containers',
     );
+  });
+});
+
+// --- seccompProfilePath ---
+
+describe('seccompProfilePath', () => {
+  it('returns absolute path under projectRoot/seccomp/agent-default.json', () => {
+    const result = seccompProfilePath();
+    expect(path.isAbsolute(result)).toBe(true);
+    expect(result.endsWith(path.join('seccomp', 'agent-default.json'))).toBe(
+      true,
+    );
+  });
+
+  it('resolves relative to process.cwd() so deployment layout matches dev', () => {
+    const result = seccompProfilePath();
+    expect(result).toBe(
+      path.join(process.cwd(), 'seccomp', 'agent-default.json'),
+    );
+  });
+});
+
+// --- assertSeccompProfileExists ---
+
+describe('assertSeccompProfileExists', () => {
+  it('returns the profile path when the file exists', () => {
+    mockExistsSync.mockReturnValue(true);
+
+    const result = assertSeccompProfileExists();
+
+    expect(result).toBe(seccompProfilePath());
+    expect(mockExistsSync).toHaveBeenCalledWith(seccompProfilePath());
+  });
+
+  it('throws fail-closed error when profile is missing', () => {
+    mockExistsSync.mockReturnValue(false);
+
+    expect(() => assertSeccompProfileExists()).toThrow(
+      /seccomp profile.*missing|not found/i,
+    );
+    // Error must mention the path so operators know what to fix
+    expect(() => assertSeccompProfileExists()).toThrow(
+      /agent-default\.json/,
+    );
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('error message references CVE-2026-31431 so operators understand the security impact', () => {
+    mockExistsSync.mockReturnValue(false);
+
+    expect(() => assertSeccompProfileExists()).toThrow(/CVE-2026-31431/);
   });
 });

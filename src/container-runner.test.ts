@@ -58,6 +58,16 @@ vi.mock('./container-runtime.js', () => ({
   hostGatewayArgs: () => [],
   readonlyMountArgs: (h: string, c: string) => ['-v', `${h}:${c}:ro`],
   stopContainer: vi.fn(),
+  // CVE-2026-31431 mitigation: real impl reads from disk and throws if
+  // missing. In tests we return a deterministic absolute path so the wired
+  // --security-opt seccomp=... arg is testable without touching the
+  // filesystem.
+  assertSeccompProfileExists: vi.fn(
+    () => '/test/abs/path/seccomp/agent-default.json',
+  ),
+  seccompProfilePath: vi.fn(
+    () => '/test/abs/path/seccomp/agent-default.json',
+  ),
 }));
 
 // Mock OneCLI SDK
@@ -476,11 +486,19 @@ describe('container-runner security hardening', () => {
     expect(args[idx - 1]).toBe('--tmpfs');
   });
 
-  it('does not include seccomp=unconfined override', async () => {
+  it('applies the NanoClaw seccomp profile (CVE-2026-31431 mitigation)', async () => {
     const args = await getSpawnArgs();
-    const seccompArgs = args.filter(
-      (a) => typeof a === 'string' && a.includes('seccomp'),
+    // Find the --security-opt seccomp=<path> pair
+    const seccompPairIdx = args.findIndex(
+      (a) => typeof a === 'string' && a.startsWith('seccomp='),
     );
-    expect(seccompArgs).toHaveLength(0);
+    expect(seccompPairIdx).toBeGreaterThan(-1);
+    expect(args[seccompPairIdx - 1]).toBe('--security-opt');
+    // The profile path must point to agent-default.json (custom NanoClaw
+    // profile that blocks AF_ALG), not to "unconfined" or "default"
+    const seccompArg = args[seccompPairIdx] as string;
+    expect(seccompArg).toMatch(/seccomp=.*agent-default\.json$/);
+    expect(seccompArg).not.toContain('unconfined');
+    expect(seccompArg).not.toBe('seccomp=default');
   });
 });

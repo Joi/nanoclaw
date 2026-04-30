@@ -20,6 +20,7 @@ import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
+  assertSeccompProfileExists,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
@@ -337,6 +338,13 @@ async function buildContainerArgs(
 
   // Security hardening
   args.push('--security-opt', 'no-new-privileges');
+  // Seccomp profile blocks AF_ALG socket creation (CVE-2026-31431) and
+  // inherits Docker's full default deny-list. Fail-closed: throws if the
+  // profile file is missing rather than silently falling back to Docker
+  // default (which does NOT block AF_ALG — verified empirically 2026-04-30).
+  // See ~/switchboard/jibrain/atlas/concepts/2026-04-30-CVE-2026-31431-AF-ALG-LPE.md
+  // and beads jibot-code-ilg.
+  args.push('--security-opt', `seccomp=${assertSeccompProfileExists()}`);
   args.push('--read-only');
   args.push('--tmpfs', '/tmp:rw,noexec,nosuid,size=256m');
   args.push('--tmpfs', '/home/node/.npm:rw,noexec,nosuid,size=64m');
