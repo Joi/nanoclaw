@@ -495,9 +495,13 @@ describe('container-runner security hardening', () => {
     expect(seccompPairIdx).toBeGreaterThan(-1);
     expect(args[seccompPairIdx - 1]).toBe('--security-opt');
     // The profile path must point to agent-default.json (custom NanoClaw
-    // profile that blocks AF_ALG), not to "unconfined" or "default"
+    // profile that blocks AF_ALG), not to "unconfined" or "default", and
+    // MUST be absolute. The leading "/" guards against a future refactor
+    // where assertSeccompProfileExists() returns a path relative to cwd
+    // (which Docker would interpret relative to the dockerd cwd, not the
+    // caller's — silent breakage). See jibot-code-1bt.
     const seccompArg = args[seccompPairIdx] as string;
-    expect(seccompArg).toMatch(/seccomp=.*agent-default\.json$/);
+    expect(seccompArg).toMatch(/^seccomp=\/.*agent-default\.json$/);
     expect(seccompArg).not.toContain('unconfined');
     expect(seccompArg).not.toBe('seccomp=default');
   });
