@@ -345,6 +345,15 @@ async function buildContainerArgs(
   // See ~/switchboard/jibrain/atlas/concepts/2026-04-30-CVE-2026-31431-AF-ALG-LPE.md
   // and beads jibot-code-ilg.
   args.push('--security-opt', `seccomp=${assertSeccompProfileExists()}`);
+  // Drop ALL capabilities; nothing re-added. Verified empirically 2026-04-30
+  // on jibotmac/Colima: shell, python, node, git, file ops with proper
+  // host-UID mapping all work under cap-drop=ALL with the existing seccomp
+  // profile. Defense-in-depth against future LPEs that bypass both seccomp
+  // and the `su` strip — even root-in-container with no caps cannot change
+  // file ownership outside its mount, bind privileged ports, load kernel
+  // modules, or override DAC. See beads jibot-code-x7w for the empirical
+  // test results and security-guardian review.
+  args.push('--cap-drop', 'ALL');
   args.push('--read-only');
   args.push('--tmpfs', '/tmp:rw,noexec,nosuid,size=256m');
   args.push('--tmpfs', '/home/node/.npm:rw,noexec,nosuid,size=64m');

@@ -501,4 +501,17 @@ describe('container-runner security hardening', () => {
     expect(seccompArg).not.toContain('unconfined');
     expect(seccompArg).not.toBe('seccomp=default');
   });
+
+  it('drops ALL Linux capabilities (defense-in-depth, jibot-code-x7w)', async () => {
+    const args = await getSpawnArgs();
+    const idx = args.indexOf('ALL');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx - 1]).toBe('--cap-drop');
+    // Sanity: no --cap-add re-additions present. The empty re-add set is the
+    // verified-safe configuration as of 2026-04-30 (see jibot-code-x7w).
+    // If this assertion fails because someone added --cap-add, that is a
+    // security regression requiring separate empirical re-verification and
+    // security-guardian review — do NOT simply update this assertion to pass.
+    expect(args).not.toContain('--cap-add');
+  });
 });
