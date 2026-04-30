@@ -183,6 +183,24 @@ describe('WhatsAppChannel', () => {
     return p;
   }
 
+  // --- makeWASocket configuration ---
+
+  describe('makeWASocket configuration', () => {
+    it('passes defaultQueryTimeoutMs: 120_000 to harden init queries against event-loop pressure (jibot-code-5m2)', async () => {
+      const baileys = await import('@whiskeysockets/baileys');
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      expect(baileys.makeWASocket).toHaveBeenCalledTimes(1);
+      const config = vi.mocked(baileys.makeWASocket).mock.calls[0][0] as { defaultQueryTimeoutMs?: number };
+      // Default is 60_000ms; we double it to absorb transient event-loop blockages
+      // (e.g. Email-channel maxBuffer overflow blocking exec callback handling).
+      expect(config.defaultQueryTimeoutMs).toBe(120_000);
+    });
+  });
+
   // --- Connection lifecycle ---
 
   describe('connection lifecycle', () => {

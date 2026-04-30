@@ -86,6 +86,12 @@ export class WhatsAppChannel implements Channel {
       printQRInTerminal: false,
       logger: logger as any,
       browser: Browsers.macOS('Chrome'),
+      // Defense-in-depth (jibot-code-5m2): default is 60_000ms which trips for
+      // every Baileys init-query bundle when transient event-loop pressure
+      // (e.g. the Email-channel maxBuffer overflow tracked in jibot-code-r8y)
+      // delays IQ response handling. Doubling the budget absorbs those stalls
+      // without changing semantics. Real fix is in r8y; this is belt-and-braces.
+      defaultQueryTimeoutMs: 120_000,
       ...(version && { version }),
     });
 
