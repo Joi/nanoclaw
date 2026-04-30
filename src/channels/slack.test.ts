@@ -633,7 +633,7 @@ describe('SlackChannel', () => {
       const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
       await channel.connect();
 
-      await channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf');
+      await channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf', 'application/pdf');
 
       expect(mockFilesUploadV2).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -651,7 +651,7 @@ describe('SlackChannel', () => {
       });
       await channel.connect();
 
-      await channel.sendFile('slack:gidc:UGIDC456', '/tmp/doc.txt', 'doc.txt');
+      await channel.sendFile('slack:gidc:UGIDC456', '/tmp/doc.txt', 'doc.txt', 'text/plain');
 
       expect(app.client.conversations.open).toHaveBeenCalledWith({
         users: 'UGIDC456',
@@ -670,8 +670,91 @@ describe('SlackChannel', () => {
       await channel.connect();
 
       await expect(
-        channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf'),
+        channel.sendFile('slack:gidc:channel:C67890DEF', '/tmp/report.pdf', 'report.pdf', 'application/pdf'),
       ).rejects.toThrow('upload_failed');
+    });
+
+    it('forwards caption as initial_comment when provided', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+      await channel.connect();
+
+      await channel.sendFile(
+        'slack:gidc:channel:C67890DEF',
+        '/tmp/report.pdf',
+        'report.pdf',
+        'application/pdf',
+        'Bhutan Tea onboarding PDF',
+      );
+
+      expect(mockFilesUploadV2).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel_id: 'C67890DEF',
+          filename: 'report.pdf',
+          initial_comment: 'Bhutan Tea onboarding PDF',
+        }),
+      );
+    });
+
+    it('omits initial_comment when caption is not provided', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+      await channel.connect();
+
+      await channel.sendFile(
+        'slack:gidc:channel:C67890DEF',
+        '/tmp/report.pdf',
+        'report.pdf',
+        'application/pdf',
+      );
+
+      expect(mockFilesUploadV2).toHaveBeenCalledWith(
+        expect.not.objectContaining({ initial_comment: expect.anything() }),
+      );
+    });
+
+    it('accepts mimetype param for signature symmetry (Slack auto-detects)', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+      await channel.connect();
+
+      await channel.sendFile(
+        'slack:gidc:channel:C67890DEF',
+        '/tmp/doc.docx',
+        'doc.docx',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      );
+
+      expect(mockFilesUploadV2).toHaveBeenCalledWith(
+        expect.objectContaining({ filename: 'doc.docx' }),
+      );
+    });
+
+    it('rejects with a timeout error when filesUploadV2 hangs', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+
+      // Connect with real timers so app.start() etc. resolve normally
+      await channel.connect();
+
+      // Switch to fake timers after connect is done
+      vi.useFakeTimers();
+      // Replace filesUploadV2 with a never-resolving promise (simulates production hang)
+      mockFilesUploadV2.mockReturnValue(new Promise<never>(() => {}));
+
+      const sendPromise = channel.sendFile(
+        'slack:gidc:channel:C67890DEF',
+        '/tmp/test.pdf',
+        'test.pdf',
+        'application/pdf',
+      );
+
+      // Attach the rejection assertion BEFORE advancing timers so the catch handler
+      // is registered before the fake setTimeout fires — avoids Node.js
+      // "PromiseRejectionHandledWarning: Promise rejection was handled asynchronously"
+      const assertion = expect(sendPromise).rejects.toThrow(/timed out after 60s/);
+
+      // Advance fake timers past the 60s timeout
+      await vi.advanceTimersByTimeAsync(60_001);
+
+      await assertion;
+      vi.useRealTimers();
     });
   });
 });

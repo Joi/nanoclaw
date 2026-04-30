@@ -1645,11 +1645,11 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
-    sendFile: async (jid, filePath, filename) => {
+    sendFile: async (jid, filePath, filename, mimetype, caption) => {
       const channel = findChannel(channels, jid) as any;
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       if (typeof channel.sendFile === 'function') {
-        return channel.sendFile(jid, filePath, filename);
+        return channel.sendFile(jid, filePath, filename, mimetype, caption);
       }
       logger.warn({ jid }, 'Channel does not support sendFile');
     },

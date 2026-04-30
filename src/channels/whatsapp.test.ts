@@ -908,4 +908,106 @@ describe('WhatsAppChannel', () => {
       expect('prefixAssistantName' in channel).toBe(false);
     });
   });
+
+  // --- sendFile ---
+
+  describe('sendFile', () => {
+    it('sends document via sock.sendMessage when connected', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await channel.sendFile(
+        'test@g.us',
+        '/tmp/test.pdf',
+        'test.pdf',
+        'application/pdf',
+        'Bhutan Tea onboarding',
+      );
+
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
+        document: { url: '/tmp/test.pdf' },
+        fileName: 'test.pdf',
+        mimetype: 'application/pdf',
+        caption: 'Bhutan Tea onboarding',
+      });
+    });
+
+    it('sends document without caption when caption is omitted', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await channel.sendFile(
+        'test@g.us',
+        '/tmp/doc.pdf',
+        'doc.pdf',
+        'application/pdf',
+      );
+
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
+        document: { url: '/tmp/doc.pdf' },
+        fileName: 'doc.pdf',
+        mimetype: 'application/pdf',
+        caption: undefined,
+      });
+    });
+
+    it('throws when disconnected', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      // Do not connect — channel starts disconnected.
+
+      await expect(
+        channel.sendFile('test@g.us', '/tmp/test.pdf', 'test.pdf', 'application/pdf'),
+      ).rejects.toThrow('WhatsApp disconnected');
+    });
+
+    it('rethrows sock.sendMessage errors', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      fakeSocket.sendMessage.mockRejectedValueOnce(new Error('network error'));
+
+      await expect(
+        channel.sendFile('test@g.us', '/tmp/test.pdf', 'test.pdf', 'application/pdf'),
+      ).rejects.toThrow('network error');
+    });
+
+    it('rejects with a timeout error when sock.sendMessage hangs', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      // Connect with real timers so the connectChannel ceremony works
+      await connectChannel(channel);
+
+      // Switch to fake timers after connect is done
+      vi.useFakeTimers();
+      // Replace sendMessage with a never-resolving promise (simulates production hang)
+      fakeSocket.sendMessage = vi.fn(() => new Promise<never>(() => {}));
+
+      const sendPromise = channel.sendFile(
+        'test@g.us',
+        '/tmp/test.pdf',
+        'test.pdf',
+        'application/pdf',
+      );
+
+      // Attach the rejection assertion BEFORE advancing timers so the catch handler
+      // is registered before the fake setTimeout fires — avoids Node.js
+      // "PromiseRejectionHandledWarning: Promise rejection was handled asynchronously"
+      const assertion = expect(sendPromise).rejects.toThrow(/timed out after 60s/);
+
+      // Advance fake timers past the 60s timeout
+      await vi.advanceTimersByTimeAsync(60_001);
+
+      await assertion;
+      vi.useRealTimers();
+    });
+  });
 });

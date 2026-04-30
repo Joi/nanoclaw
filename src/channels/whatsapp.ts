@@ -27,6 +27,7 @@ import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../t
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const WA_VERSION_URL = 'https://raw.githubusercontent.com/WhiskeySockets/Baileys/master/src/Defaults/baileys-version.json';
+const SENDFILE_TIMEOUT_MS = 60_000;
 
 function fetchWaVersion(): Promise<[number, number, number] | undefined> {
   return new Promise((resolve) => {
@@ -302,6 +303,40 @@ export class WhatsAppChannel implements Channel {
         }
       }
     });
+  }
+
+  async sendFile(
+    jid: string,
+    filePath: string,
+    filename: string,
+    mimetype: string,
+    caption?: string,
+  ): Promise<void> {
+    if (!this.connected) {
+      throw new Error('WhatsApp disconnected; cannot send file');
+    }
+    let timer: NodeJS.Timeout;
+    const sendPromise = this.sock.sendMessage(jid, {
+      document: { url: filePath },
+      fileName: filename,
+      mimetype,
+      caption,
+    });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`WhatsApp sendFile timed out after ${SENDFILE_TIMEOUT_MS / 1000}s for jid=${jid} filename=${filename}`)),
+        SENDFILE_TIMEOUT_MS,
+      );
+    });
+    try {
+      await Promise.race([sendPromise, timeoutPromise]);
+      logger.info({ jid, filename, mimetype, captionLen: caption?.length }, 'WA file sent');
+    } catch (err) {
+      logger.error({ jid, filename, err }, 'Failed to send WA file');
+      throw err;
+    } finally {
+      clearTimeout(timer!);
+    }
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
