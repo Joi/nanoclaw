@@ -36,6 +36,7 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => true),
       mkdirSync: vi.fn(),
+      readFileSync: vi.fn(() => Buffer.from('mocked-pdf-bytes')),
     },
   };
 });
@@ -927,7 +928,7 @@ describe('WhatsAppChannel', () => {
       );
 
       expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
-        document: { url: '/tmp/test.pdf' },
+        document: expect.any(Buffer),
         fileName: 'test.pdf',
         mimetype: 'application/pdf',
         caption: 'Bhutan Tea onboarding',
@@ -948,7 +949,7 @@ describe('WhatsAppChannel', () => {
       );
 
       expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
-        document: { url: '/tmp/doc.pdf' },
+        document: expect.any(Buffer),
         fileName: 'doc.pdf',
         mimetype: 'application/pdf',
         caption: undefined,

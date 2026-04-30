@@ -316,7 +316,7 @@ export class WhatsAppChannel implements Channel {
     }
     try {
       await this.sock.sendMessage(jid, {
-        document: { url: filePath },
+        document: fs.readFileSync(filePath),
         fileName: filename,
         mimetype,
         caption,

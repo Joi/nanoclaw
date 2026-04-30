@@ -99,7 +99,7 @@ async sendFile(
   }
   try {
     await this.sock.sendMessage(jid, {
-      document: { url: filePath },   // Baileys streams from disk
+      document: fs.readFileSync(filePath),   // Buffer; see note below
       fileName: filename,
       mimetype,
       caption,
@@ -114,7 +114,7 @@ async sendFile(
 
 Decisions baked in:
 
-- **Stream via `{url: filePath}`** rather than `fs.readFileSync` — file payloads can be MB-scale; Baileys handles disk streaming.
+- **Read file as Buffer via `fs.readFileSync(filePath)`** rather than `{url: filePath}`. The `{url: localPath}` form caused Baileys 6.6.0 to hang indefinitely during the document-upload step on jibotmac (verified empirically 2026-04-30: dispatcher logged `fetched media stream` then `sock.sendMessage` never resolved). The canonical Baileys example uses a Buffer for `documentMessage`. For files large enough that an in-memory Buffer is wrong (multi-MB), the next step up is `{stream: fs.createReadStream(filePath)}` — out of scope for v1 since the immediate need is small PDFs.
 - **Fail fast on disconnect** rather than queueing. The existing `outgoingQueue` for `sendMessage` is text-only by design; queueing files in memory across reconnects is bad form. Caller retries.
 - **No assistant-name prefix.** `sendMessage` prepends "jibot:" on shared-number setups; `sendFile` does NOT — the document carries its own context, and the optional `caption` is the right place for any prose.
 
