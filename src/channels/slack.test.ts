@@ -726,5 +726,35 @@ describe('SlackChannel', () => {
         expect.objectContaining({ filename: 'doc.docx' }),
       );
     });
+
+    it('rejects with a timeout error when filesUploadV2 hangs', async () => {
+      const channel = new SlackChannel(createOpts({ namespace: 'gidc' }));
+
+      // Connect with real timers so app.start() etc. resolve normally
+      await channel.connect();
+
+      // Switch to fake timers after connect is done
+      vi.useFakeTimers();
+      // Replace filesUploadV2 with a never-resolving promise (simulates production hang)
+      mockFilesUploadV2.mockReturnValue(new Promise<never>(() => {}));
+
+      const sendPromise = channel.sendFile(
+        'slack:gidc:channel:C67890DEF',
+        '/tmp/test.pdf',
+        'test.pdf',
+        'application/pdf',
+      );
+
+      // Attach the rejection assertion BEFORE advancing timers so the catch handler
+      // is registered before the fake setTimeout fires — avoids Node.js
+      // "PromiseRejectionHandledWarning: Promise rejection was handled asynchronously"
+      const assertion = expect(sendPromise).rejects.toThrow(/timed out after 60s/);
+
+      // Advance fake timers past the 60s timeout
+      await vi.advanceTimersByTimeAsync(60_001);
+
+      await assertion;
+      vi.useRealTimers();
+    });
   });
 });

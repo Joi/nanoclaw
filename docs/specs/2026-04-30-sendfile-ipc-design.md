@@ -238,6 +238,20 @@ Repo: **`~/repos/nanoclaw`** (origin: `git@github-nanoclaw:Joi/nanoclaw.git`). S
 | `tests/test_send_message.py` *(new or extended — TBD)* | Add `cmd_send_file` tests |
 | `~/dotfiles-private/amplifier/skills/jibot-messaging/SKILL.md` | Document the new command |
 
+## Resilience: timeout protection
+
+Both channels' `sendFile` wrap their underlying transport call (Baileys `sock.sendMessage` for WhatsApp; `app.client.filesUploadV2` for Slack) in `Promise.race` with a 60-second timeout. On timeout, an `Error` is thrown with a descriptive message including the JID and filename, allowing the caller (`startIpcWatcher` and any direct invokers in `index.ts`) to log and skip rather than wedge the watcher loop.
+
+This was added in response to beads `jibot-code-tel`, where production NanoClaw exhibited apparent "wedges" on file sends that could not be reproduced in isolation. Diagnostic work showed:
+
+- **Standalone Baileys** sends the same PDF to the same group with the same auth state in 1.98 s.
+- **Standalone Slack `filesUploadV2`** completes in 2.65 s with no event-loop blocking.
+- **Production NanoClaw** is the only environment where the hang reproduces, and the hang point shifts (sometimes mid-Baileys-encryption, sometimes silently early in the Slack pipeline).
+
+The leading hypothesis is event-loop pressure from concurrent NanoClaw work — most prominently a hot retry loop in the email channel (`Email channel: failed to get thread` firing every 2 minutes lifetime). Those underlying causes are tracked separately in beads `jibot-code-r8y` (email retry loop) and `jibot-code-5m2` (Baileys init queries intermittent timeout). The timeout-wrap here doesn't fix the root cause — it makes the symptom recoverable instead of catastrophic.
+
+60 s is comfortable for typical document sizes (<5 MB) over residential broadband. Larger files or worse networks may require revisiting; if so, parameterize via channel constructor opts.
+
 ## Out of scope
 
 Per the originating beads issue:

@@ -16,6 +16,7 @@ import { Channel, NewMessage, OnChatMetadata, OnInboundMessage, RegisteredGroup 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 /** Max extracted text length per file (chars) */
 const MAX_TEXT_CHARS = 80_000;
+const SENDFILE_TIMEOUT_MS = 60_000;
 
 export interface SlackChannelOpts {
   onMessage: OnInboundMessage;
@@ -131,17 +132,27 @@ export class SlackChannel implements Channel {
     caption?: string,
   ): Promise<void> {
     const channelId = await this.resolveChannelId(jid);
+    let timer: NodeJS.Timeout;
+    const uploadPromise = this.app.client.filesUploadV2({
+      channel_id: channelId,
+      file: fs.createReadStream(filePath),
+      filename,
+      ...(caption ? { initial_comment: caption } : {}),
+    });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`Slack filesUploadV2 timed out after 60s for channel=${channelId} filename=${filename}`)),
+        SENDFILE_TIMEOUT_MS,
+      );
+    });
     try {
-      await this.app.client.filesUploadV2({
-        channel_id: channelId,
-        file: fs.createReadStream(filePath),
-        filename,
-        ...(caption ? { initial_comment: caption } : {}),
-      });
+      await Promise.race([uploadPromise, timeoutPromise]);
       logger.info({ jid, filename, captionLen: caption?.length }, 'Slack file uploaded');
     } catch (err) {
       logger.error({ jid, filename, err }, 'Failed to upload Slack file');
       throw err;
+    } finally {
+      clearTimeout(timer!);
     }
   }
 

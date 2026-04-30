@@ -978,5 +978,36 @@ describe('WhatsAppChannel', () => {
         channel.sendFile('test@g.us', '/tmp/test.pdf', 'test.pdf', 'application/pdf'),
       ).rejects.toThrow('network error');
     });
+
+    it('rejects with a timeout error when sock.sendMessage hangs', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      // Connect with real timers so the connectChannel ceremony works
+      await connectChannel(channel);
+
+      // Switch to fake timers after connect is done
+      vi.useFakeTimers();
+      // Replace sendMessage with a never-resolving promise (simulates production hang)
+      fakeSocket.sendMessage = vi.fn(() => new Promise<never>(() => {}));
+
+      const sendPromise = channel.sendFile(
+        'test@g.us',
+        '/tmp/test.pdf',
+        'test.pdf',
+        'application/pdf',
+      );
+
+      // Attach the rejection assertion BEFORE advancing timers so the catch handler
+      // is registered before the fake setTimeout fires — avoids Node.js
+      // "PromiseRejectionHandledWarning: Promise rejection was handled asynchronously"
+      const assertion = expect(sendPromise).rejects.toThrow(/timed out after 60s/);
+
+      // Advance fake timers past the 60s timeout
+      await vi.advanceTimersByTimeAsync(60_001);
+
+      await assertion;
+      vi.useRealTimers();
+    });
   });
 });
