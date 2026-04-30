@@ -173,9 +173,11 @@ export const EMAIL_INTAKE_POLL_INTERVAL = parseInt(
 export const EMAIL_CHANNEL_ENABLED =
   (process.env.EMAIL_CHANNEL_ENABLED || envConfig.EMAIL_CHANNEL_ENABLED || '') === 'true';
 export const EMAIL_CHANNEL_POLL_INTERVAL = parseInt(
-  process.env.EMAIL_CHANNEL_POLL_INTERVAL || '120000',
+  process.env.EMAIL_CHANNEL_POLL_INTERVAL || '900000',
   10,
-); // 2 min default
+); // 15 min default (was 2 min) — reduces "failed to get thread" retry-storm
+   // pressure on the event loop while we investigate the underlying gog gmail
+   // thread fetch failures. See beads jibot-code-r8y.
 export const EMAIL_ALIAS_MAP_PATH = path.join(
   HOME_DIR,
   '.config',
