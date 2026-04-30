@@ -29,6 +29,27 @@ RUN apt-get update && apt-get install -y \
     socat \
     && rm -rf /var/lib/apt/lists/*
 
+# Defense-in-depth for CVE-2026-31431 (Linux kernel AF_ALG LPE, disclosed 2026-04-29).
+# The exploit chain is socket(AF_ALG) -> write payload -> exec `su` to root. The
+# seccomp profile (seccomp/agent-default.json, wired in via container-runner.ts)
+# breaks step 1; this layer breaks step 3 by removing the `su` primitive entirely.
+# Independently effective: even if a future kernel LPE bypasses seccomp, an agent
+# in this image has no `su` to escalate with.
+#
+# Other setuid binaries shipped in node:22-slim that this layer also strips:
+# `passwd`, `chfn`, `chsh`, `gpasswd`, `newgrp` (no legitimate use in agent
+# containers; removing them shrinks the privilege-escalation surface). `mount`
+# and `umount` are deliberately retained — chromium's renderer sandbox sometimes
+# inspects them and removing them surfaces noisy errors without gaining defense
+# (the syscalls are already blocked by seccomp + no-new-privileges + USER node).
+#
+# See ~/switchboard/jibrain/atlas/concepts/2026-04-30-CVE-2026-31431-AF-ALG-LPE.md
+# and beads jibot-code-ilg.
+RUN rm -f /bin/su /usr/bin/su \
+          /usr/bin/passwd /usr/bin/chfn /usr/bin/chsh \
+          /usr/bin/gpasswd /usr/bin/newgrp \
+    && ! command -v su
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
