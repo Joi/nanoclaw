@@ -13,6 +13,7 @@ Routes messages to the correct IPC group directory based on recipient config.
 """
 
 import json
+import mimetypes
 import os
 import re
 import sqlite3
@@ -418,10 +419,96 @@ def cmd_init(args):
     })
 
 
+def cmd_send_file(args):
+    """send-file "<recipient>" "<file-path>" ["<caption>"] [--as "<name>"]
+
+    Sends a local file as a document attachment through any channel that
+    implements sendFile (WhatsApp, Slack). The caption is optional.
+    --as overrides the display filename; the default is basename of the path.
+    """
+    # Parse --as option out of args first
+    filename_override = None
+    positional = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--as" and i + 1 < len(args):
+            filename_override = args[i + 1]
+            i += 2
+        else:
+            positional.append(args[i])
+            i += 1
+
+    if len(positional) < 2:
+        fail("Usage: send-file <recipient> <file-path> [<caption>] [--as <name>]")
+
+    query = positional[0]
+    file_path_str = positional[1]
+    caption = positional[2] if len(positional) > 2 else None
+
+    # Validate file exists and is readable
+    if not os.path.isfile(file_path_str):
+        fail(f"File not found or not a regular file: {file_path_str}")
+    if not os.access(file_path_str, os.R_OK):
+        fail(f"File is not readable: {file_path_str}")
+
+    abs_path = os.path.abspath(file_path_str)
+    filename = filename_override or os.path.basename(abs_path)
+
+    # Infer mimetype from display filename; fall back to octet-stream
+    mime_type, _ = mimetypes.guess_type(filename)
+    mimetype = mime_type or "application/octet-stream"
+
+    # Resolve recipient
+    recipients = load_registry()
+    key, entry = resolve_recipient(query, recipients)
+    if not entry:
+        fail(f"No recipient found for {query}. Try: resolve \"{query}\"")
+
+    jid = entry["jid"]
+    channel = entry.get("channel", "unknown")
+
+    # Route to correct IPC group
+    ipc_group = resolve_ipc_group(key, entry)
+    ipc_dir = IPC_BASE / ipc_group / "messages"
+    ipc_dir.mkdir(parents=True, exist_ok=True)
+
+    msg_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
+    msg_file = ipc_dir / f"{msg_id}.json"
+
+    ipc_msg = {
+        "type": "file",
+        "chatJid": jid,
+        "filePath": abs_path,
+        "filename": filename,
+        "mimetype": mimetype,
+    }
+    if caption:
+        ipc_msg["caption"] = caption
+
+    with open(msg_file, "w") as f:
+        json.dump(ipc_msg, f, indent=2)
+        f.write("\n")
+
+    result = {
+        "status": "sent",
+        "recipient": key,
+        "jid": jid,
+        "channel": channel,
+        "ipc_group": ipc_group,
+        "ipc_file": str(msg_file),
+        "filename": filename,
+        "mimetype": mimetype,
+    }
+    if caption:
+        result["caption_preview"] = caption[:100] + ("..." if len(caption) > 100 else "")
+
+    ok(result)
+
+
 def main():
     if len(sys.argv) < 2:
         err("Usage: send-message.py <command> [args...]")
-        err("Commands: send, email, resolve, list, init")
+        err("Commands: send, send-file, email, resolve, list, init")
         sys.exit(1)
 
     command = sys.argv[1].lower()
@@ -429,6 +516,7 @@ def main():
 
     commands = {
         "send": cmd_send,
+        "send-file": cmd_send_file,
         "email": cmd_email,
         "resolve": cmd_resolve,
         "list": cmd_list,
