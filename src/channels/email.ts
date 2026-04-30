@@ -29,6 +29,7 @@ import { extractSenderEmail, isJibotAddress, parseEmailAlias, EmailAlias } from 
 import { EmailApprovalGate } from '../email-approval-gate.js';
 import { filterAttachments } from '../email-attachment-filter.js';
 import { CalendarAdapter } from '../email-calendar-adapter.js';
+import { ThreadFailureTracker } from '../email-thread-failure-tracker.js';
 import { EmailIdentityResolver, IdentityResult } from '../email-identity-resolver.js';
 import { resolveEmailIntent, IntentResult } from '../email-intent-resolver.js';
 import { checkEmailPolicy } from '../email-policy-adapter.js';
@@ -44,6 +45,10 @@ const execFileAsync = promisify(execFile);
 
 const LABEL_NAME = 'nanoclaw-processed';
 const GOG_TIMEOUT = 30_000;
+// 16 MB. Node's child_process default is 1 MB, which trips for any Gmail thread
+// containing attachments or a long history (jibot-code-r8y). Larger threads
+// hitting this ceiling are caught by the per-thread circuit breaker below.
+const GOG_MAX_BUFFER = 16 * 1024 * 1024;
 const MAX_BODY_LENGTH = 10_000;
 
 // --- gog JSON types (preserved from v1) ---
@@ -140,6 +145,11 @@ export class EmailChannel implements Channel {
   private threadStore: EmailThreadSessionStore;
   private calendarAdapter: CalendarAdapter;
   private reminderAdapter: ReminderAdapter;
+
+  // Circuit breaker for threads that consistently fail to fetch (jibot-code-r8y).
+  // After 3 failures within a 4h window, subsequent fetches are skipped to keep
+  // the poll loop from burning event-loop cycles on a single oversized thread.
+  private threadFailures = new ThreadFailureTracker();
 
   constructor(opts: EmailChannelOpts) {
     this.opts = opts;
@@ -306,6 +316,15 @@ export class EmailChannel implements Channel {
   }
 
   private async processThread(thread: GogThread): Promise<void> {
+    // Circuit breaker (jibot-code-r8y): skip threads that have failed repeatedly recently.
+    if (this.threadFailures.shouldSkip(thread.id)) {
+      logger.warn(
+        { threadId: thread.id, failures: this.threadFailures.failureCount(thread.id) },
+        'Email channel: skipping thread with repeated fetch failures (circuit breaker open)',
+      );
+      return;
+    }
+
     // Fetch full thread
     let threadDetail: GogThreadDetail;
     try {
@@ -315,9 +334,14 @@ export class EmailChannel implements Channel {
         '--account', EMAIL_INTAKE_ACCOUNT,
       ]);
       threadDetail = JSON.parse(raw) as GogThreadDetail;
+      this.threadFailures.clear(thread.id); // success: reset breaker for this thread
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error({ threadId: thread.id, error: msg }, 'Email channel: failed to get thread');
+      const failures = this.threadFailures.recordFailure(thread.id);
+      logger.error(
+        { threadId: thread.id, error: msg, failures },
+        'Email channel: failed to get thread',
+      );
       return;
     }
 
@@ -736,6 +760,7 @@ export class EmailChannel implements Channel {
       env: { ...process.env, GOG_KEYRING_PASSWORD },
       encoding: 'utf-8',
       timeout: GOG_TIMEOUT,
+      maxBuffer: GOG_MAX_BUFFER,
     });
     return stdout;
   }
@@ -746,6 +771,7 @@ export class EmailChannel implements Channel {
         env: { ...process.env, GOG_KEYRING_PASSWORD },
         encoding: 'utf-8',
         timeout: GOG_TIMEOUT,
+        maxBuffer: GOG_MAX_BUFFER,
       }, (err, stdout, stderr) => {
         if (err) {
           reject(new Error(`${err.message}\n${stderr}`));
