@@ -74,6 +74,61 @@ describe('parseClaimedName', () => {
   });
 });
 
+describe('regression: dependent clause "the person I\'m referring to"', () => {
+  // Bug 2026-04-30: a LINE message reading
+  //   "Here is the person I'm referring to: https://www.jst.go.jp/..."
+  // produced a claim with claimed_identity: "referring to:" because the
+  // unanchored regex matched "I'm" mid-sentence and greedily captured the
+  // rest of the line.
+  const dependentClause =
+    "@jibot I'd like to start this project as your third client. " +
+    "In that case, could you please conduct some preliminary research on " +
+    "Mr. Kazuhito Hashimoto in advance? Here is the person I'm referring to: " +
+    "https://www.jst.go.jp/all/about/president/index.html";
+
+  it('parseClaimedName returns null for the original buggy message', () => {
+    expect(parseClaimedName(dependentClause)).toBeNull();
+  });
+
+  it('parseClaimedName returns null for any "I\'m referring to" snippet', () => {
+    expect(parseClaimedName("the person I'm referring to:")).toBeNull();
+    expect(parseClaimedName("Here is the person I'm referring to")).toBeNull();
+  });
+
+  it('parseClaimedName rejects non-name lead words after I\'m', () => {
+    expect(parseClaimedName("I'm not sure")).toBeNull();
+    expect(parseClaimedName("I'm going home")).toBeNull();
+    expect(parseClaimedName("I'm here")).toBeNull();
+    expect(parseClaimedName("I'm just asking")).toBeNull();
+    expect(parseClaimedName("I'm sorry")).toBeNull();
+  });
+
+  it('parseClaimedName stops capture at sentence/URL boundaries', () => {
+    expect(parseClaimedName("I'm Tatsuya. Here is the URL https://x.com")).toBe('Tatsuya');
+    expect(parseClaimedName("I'm Karma, please add me")).toBe('Karma');
+  });
+
+  it('parseClaimedName accepts greetings before the claim', () => {
+    expect(parseClaimedName('Hi, I\'m Tatsuya Ishibe')).toBe('Tatsuya Ishibe');
+  });
+});
+
+describe('regression: isRegistrationIntent rejects dependent clauses', () => {
+  it('does not fire on "the person I\'m referring to"', () => {
+    expect(
+      isRegistrationIntent('Here is the person I\'m referring to: https://example.com')
+    ).toBe(false);
+  });
+
+  it('does not fire on "I\'m" embedded in a sentence', () => {
+    expect(isRegistrationIntent('the person I\'m looking for')).toBe(false);
+  });
+
+  it('still fires on greeting + claim', () => {
+    expect(isRegistrationIntent('Hi, I\'m Tatsuya')).toBe(true);
+  });
+});
+
 describe('lookupIdentity', () => {
   it('returns matched identity for a known JID', () => {
     const indexPath = path.join(tmpDir, 'identity-index.json');
