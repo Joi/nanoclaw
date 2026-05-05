@@ -120,6 +120,26 @@ interface ExecuteOptions {
   timeoutMs?: number;
 }
 
+/**
+ * Hard cap on prompt size. Defends against:
+ *   - Accidental runaway loops dumping huge transcripts as prompts
+ *   - Abuse via maliciously-crafted long messages (token cost amplification)
+ *   - Memory pressure on amplifierd (the joi bundle has heavy MCP backends)
+ *
+ * 256KB ≈ 64K tokens at typical text density — well above any normal Signal
+ * DM batch (Signal max-message-size is 8KB and NanoClaw caps batch sizes)
+ * but bounded enough to keep runaway prompts from crashing amplifierd.
+ *
+ * Set MAX_PROMPT_BYTES env var to override at deploy time (rarely needed).
+ */
+const DEFAULT_MAX_PROMPT_BYTES = 256 * 1024;
+function maxPromptBytes(): number {
+  const env = process.env.AMPLIFIERD_MAX_PROMPT_BYTES;
+  if (!env) return DEFAULT_MAX_PROMPT_BYTES;
+  const n = parseInt(env, 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_PROMPT_BYTES;
+}
+
 interface HttpResult {
   status: number;
   body: string;
@@ -241,6 +261,15 @@ export async function executePrompt(
   prompt: string,
   opts: ExecuteOptions = {},
 ): Promise<{ response: string }> {
+  // Defense: cap prompt size BEFORE any network call
+  const promptBytes = Buffer.byteLength(prompt, 'utf8');
+  const maxBytes = maxPromptBytes();
+  if (promptBytes > maxBytes) {
+    throw new Error(
+      `amplifierd executePrompt: prompt size ${promptBytes} bytes exceeds limit ${maxBytes} bytes (set AMPLIFIERD_MAX_PROMPT_BYTES to raise)`,
+    );
+  }
+
   const creds = loadAmplifierdCreds();
   const timeoutMs = opts.timeoutMs ?? 90_000;
 

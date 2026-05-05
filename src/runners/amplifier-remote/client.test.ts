@@ -180,3 +180,34 @@ describe('executePrompt', () => {
     await expect(executePrompt('abc', 'p')).rejects.toThrow(/response|shape/i);
   });
 });
+
+
+describe('executePrompt — prompt size cap (security)', () => {
+  it('throws when prompt exceeds 256KB without making any HTTP request', async () => {
+    const huge = 'x'.repeat(257 * 1024); // 257KB > 256KB limit
+    await expect(executePrompt('abc', huge)).rejects.toThrow(/prompt size.*exceeds limit/);
+    expect(http.request).not.toHaveBeenCalled();
+  });
+
+  it('accepts prompts at the limit boundary (256KB)', async () => {
+    setMockResponse(200, JSON.stringify({ response: 'ok' }));
+    const atLimit = 'x'.repeat(256 * 1024);
+    const result = await executePrompt('abc', atLimit);
+    expect(result.response).toBe('ok');
+  });
+
+  it('respects AMPLIFIERD_MAX_PROMPT_BYTES env override', async () => {
+    const original = process.env.AMPLIFIERD_MAX_PROMPT_BYTES;
+    process.env.AMPLIFIERD_MAX_PROMPT_BYTES = '1024';
+    try {
+      const just_over = 'x'.repeat(1100);
+      await expect(executePrompt('abc', just_over)).rejects.toThrow(/exceeds limit 1024/);
+    } finally {
+      if (original === undefined) {
+        delete process.env.AMPLIFIERD_MAX_PROMPT_BYTES;
+      } else {
+        process.env.AMPLIFIERD_MAX_PROMPT_BYTES = original;
+      }
+    }
+  });
+});
