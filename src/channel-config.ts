@@ -78,6 +78,14 @@ export interface ChannelConfig {
    * Format: platform-native sender ID, e.g. '+819048411965' for Signal.
    */
   allowed_senders?: string[];
+  /**
+   * Auto-file bare URLs (whitespace + URL + whitespace, nothing else) to the
+   * knowledge-intake sprite. When true, single-message batches that ARE a bare
+   * URL get intercepted: NanoClaw POSTs to the sprite, replies with a brief
+   * confirmation, and skips the agent dispatch entirely. Default false.
+   * Added 2026-05-06 for joi-k1x9 prompt-chain redesign.
+   */
+  auto_url_intake?: boolean;
 }
 
 /** Port mapping for access-tiered QMD MCP services.
@@ -388,4 +396,16 @@ export function getAllowedSenders(
   configs: Map<string, ChannelConfig>,
 ): string[] {
   return configs.get(jid)?.allowed_senders ?? [];
+}
+
+/**
+ * Whether this channel should auto-file bare URLs to knowledge-intake.
+ * Defaults to false. Set `auto_url_intake: true` in YAML to opt in.
+ * Added 2026-05-06 for joi-k1x9.
+ */
+export function getAutoUrlIntake(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): boolean {
+  return configs.get(jid)?.auto_url_intake === true;
 }

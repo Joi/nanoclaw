@@ -105,6 +105,7 @@ import { logger } from './logger.js';
 import { loadChannelConfigs, getQmdPorts, getListeningMode, getChannelConfig, getSenderPolicy, getAccessFlags,
 } from './channel-config.js';
 import { runAmplifierRemoteAgent, isAmplifierRemoteAllowed } from './runners/amplifier-remote/index.js';
+import { detectBareUrl, intakeUrl, formatIntakeReply } from './url-intake.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
@@ -568,6 +569,63 @@ ${prompt}`
   // for amplifier-remote dispatch (joi-1l51). For the claude-agent-sdk path this is
   // ignored. For 1:1 DMs there's only one possible non-bot sender.
   const triggeringMsg = [...missedMessages].reverse().find((m) => !m.is_from_me);
+
+  // ─── Bare-URL auto-intake (joi-k1x9) ─────────────────────────────────────
+  // If the channel YAML opts in via `auto_url_intake: true` AND the batch is
+  // exactly one non-bot message that is a bare URL (whitespace + http(s) URL
+  // + whitespace, nothing else), file the URL to the knowledge-intake sprite
+  // and short-circuit the agent dispatch. The user gets a brief confirmation
+  // reply with the extracted title + classification.
+  //
+  // Multi-message batches and URLs-with-text fall through to the agent.
+  // The 3-min jibrain-hook batch still fires (raw-message capture) — that
+  // duplication is acceptable for the canary; deduping is joi-k1x9 follow-up.
+  const intakeChannelCfg = getChannelConfig(chatJid, channelConfigs);
+  if (
+    intakeChannelCfg?.auto_url_intake === true &&
+    triggeringMsg &&
+    missedMessages.filter((m) => !m.is_from_me).length === 1
+  ) {
+    const bareUrl = detectBareUrl(triggeringMsg.content);
+    if (bareUrl) {
+      logger.info(
+        { chatJid, channelName: intakeChannelCfg.channel_name, url: bareUrl, sender: triggeringMsg.sender },
+        'auto-url-intake: bare URL detected, filing to knowledge-intake (skipping agent dispatch)',
+      );
+      await channel.setTyping?.(chatJid, true);
+      try {
+        const intakeResult = await intakeUrl(bareUrl);
+        const reply = formatIntakeReply(intakeResult, bareUrl);
+        await channel.sendMessage(chatJid, reply);
+        if (intakeResult.error) {
+          logger.warn(
+            { chatJid, url: bareUrl, err: intakeResult.error },
+            'auto-url-intake: knowledge-intake returned error',
+          );
+        } else {
+          logger.info(
+            { chatJid, url: bareUrl, title: intakeResult.title, file_path: intakeResult.file_path },
+            'auto-url-intake: filed successfully',
+          );
+        }
+      } catch (err) {
+        // Defensive — intakeUrl never throws (returns { error } on failure),
+        // but if some unexpected exception bubbles up, surface a generic reply
+        // and continue (do NOT fall through to the agent — user might think
+        // their URL got two replies).
+        const msg = (err as Error).message;
+        logger.error(
+          { chatJid, url: bareUrl, err: msg },
+          'auto-url-intake: unexpected exception during intake',
+        );
+        await channel.sendMessage(chatJid, `URL intake failed unexpectedly: ${msg.slice(0, 200)}`);
+      } finally {
+        await channel.setTyping?.(chatJid, false);
+      }
+      return true; // success — skip the agent dispatch path entirely
+    }
+  }
+  // ─── End bare-URL auto-intake ─────────────────────────────────────────────
 
   const output = await runAgent(group, enrichedPrompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
