@@ -119,3 +119,92 @@ describe('runAmplifierRemoteAgent — error handling', () => {
     expect((onOutput as ReturnType<typeof vi.fn>).mock.calls[0][0].status).toBe('error');
   });
 });
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// Stale-session auto-recovery (added 2026-05-05 after live-test discovery)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// NanoClaw stores session_id per group_folder in SQLite messages.db. That
+// session ID can outlive its amplifierd peer (amplifierd restart, hot-replace,
+// daily session cleanup), causing executePrompt to throw "amplifierd 404
+// session not found". The runner should detect this, drop the stale ID, create
+// a fresh session, and retry once.
+
+describe('runAmplifierRemoteAgent — stale session auto-recovery', () => {
+  it('on 404 with reused session, creates a fresh session and retries', async () => {
+    (executePrompt as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error("amplifierd 404 on executePrompt: Session 'abc-stale' not found"))
+      .mockResolvedValueOnce({ response: 'recovered reply' });
+    (createSession as ReturnType<typeof vi.fn>).mockResolvedValue('fresh-session-id');
+
+    const input: ContainerInput = { ...makeInput(), sessionId: 'abc-stale' };
+    const result = await runAmplifierRemoteAgent(TEST_GROUP, input);
+
+    expect(result.status).toBe('success');
+    expect(result.result).toBe('recovered reply');
+    expect(result.newSessionId).toBe('fresh-session-id');
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(executePrompt).toHaveBeenCalledTimes(2);
+    expect((executePrompt as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('abc-stale');
+    expect((executePrompt as ReturnType<typeof vi.fn>).mock.calls[1][0]).toBe('fresh-session-id');
+  });
+
+  it('on "Session Not Found" pattern, also rotates and retries', async () => {
+    (executePrompt as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error('amplifierd 404 on executePrompt: {"detail":{"title":"Session Not Found"}}'))
+      .mockResolvedValueOnce({ response: 'ok' });
+    (createSession as ReturnType<typeof vi.fn>).mockResolvedValue('fresh-id');
+
+    const result = await runAmplifierRemoteAgent(
+      TEST_GROUP,
+      { ...makeInput(), sessionId: 'stale' },
+    );
+    expect(result.status).toBe('success');
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT retry on non-stale errors (e.g. 401, 500, network)', async () => {
+    (executePrompt as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('amplifierd 401 on executePrompt: invalid x-api-key'),
+    );
+
+    const result = await runAmplifierRemoteAgent(
+      TEST_GROUP,
+      { ...makeInput(), sessionId: 'some-id' },
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.error).toMatch(/401/);
+    expect(createSession).not.toHaveBeenCalled();
+    expect(executePrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT retry when there was no cached sessionId (just-created session must be valid)', async () => {
+    (createSession as ReturnType<typeof vi.fn>).mockResolvedValue('new-id');
+    (executePrompt as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("amplifierd 404 on executePrompt: Session 'new-id' not found"),
+    );
+
+    const input: ContainerInput = { ...makeInput() }; // no sessionId
+    const result = await runAmplifierRemoteAgent(TEST_GROUP, input);
+
+    expect(result.status).toBe('error');
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(executePrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('on retry-also-fails, returns error from the retry attempt', async () => {
+    (executePrompt as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new Error("amplifierd 404 on executePrompt: Session 'stale' not found"))
+      .mockRejectedValueOnce(new Error('amplifierd 500 on executePrompt: server crashed'));
+    (createSession as ReturnType<typeof vi.fn>).mockResolvedValue('fresh-id');
+
+    const result = await runAmplifierRemoteAgent(
+      TEST_GROUP,
+      { ...makeInput(), sessionId: 'stale' },
+    );
+    expect(result.status).toBe('error');
+    expect(result.error).toMatch(/500|server crashed/);
+  });
+});
