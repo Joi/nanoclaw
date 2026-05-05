@@ -104,6 +104,7 @@ import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { loadChannelConfigs, getQmdPorts, getListeningMode, getChannelConfig, getSenderPolicy, getAccessFlags,
 } from './channel-config.js';
+import { runAmplifierRemoteAgent, isAmplifierRemoteAllowed } from './runners/amplifier-remote/index.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
@@ -563,6 +564,11 @@ ${prompt}`
   let hadError = false;
   let outputSentToUser = false;
 
+  // Pick the latest non-bot message in the batch as the safety predicate input
+  // for amplifier-remote dispatch (joi-1l51). For the claude-agent-sdk path this is
+  // ignored. For 1:1 DMs there's only one possible non-bot sender.
+  const triggeringMsg = [...missedMessages].reverse().find((m) => !m.is_from_me);
+
   const output = await runAgent(group, enrichedPrompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
@@ -601,7 +607,7 @@ ${prompt}`
     if (result.status === 'error') {
       hadError = true;
     }
-  });
+  }, triggeringMsg);
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -634,6 +640,13 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  /**
+   * Latest non-bot message in the batch — required for amplifier-remote
+   * safety predicate (Layer 4: sender allowlist + !is_from_me).
+   * If undefined, amplifier-remote dispatch is skipped (falls through to
+   * claude-agent-sdk). Added 2026-05-05 for joi-1l51.
+   */
+  triggeringMessage?: NewMessage,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -687,6 +700,68 @@ async function runAgent(
   if (process.env.JIBOT_INTERNAL_SECRET) {
     extraEnv.JIBOT_INTERNAL_SECRET = process.env.JIBOT_INTERNAL_SECRET;
   }
+
+  // ─── Engine routing: amplifier-remote ────────────────────────────────────
+  // Added 2026-05-05 for joi-1l51 (NanoClaw → remote Amplifier session pipe).
+  // If the channel YAML has `engine: amplifier-remote` AND the 4-layer safety
+  // predicate passes, route to amplifierd over HTTP instead of the local
+  // claude-agent-sdk container. Any failure (predicate refusal, runner error)
+  // falls through to the existing claude-agent-sdk path with a warn log —
+  // the user always gets a response.
+  const channelCfg = getChannelConfig(chatJid, channelConfigs);
+  if (channelCfg?.engine === 'amplifier-remote') {
+    if (!triggeringMessage) {
+      logger.warn(
+        { chatJid, channelName: channelCfg.channel_name },
+        'amplifier-remote: no triggeringMessage passed to runAgent — falling through to claude-agent-sdk',
+      );
+    } else {
+      const safety = isAmplifierRemoteAllowed(channelCfg, triggeringMessage);
+      if (safety.ok) {
+        logger.info(
+          {
+            chatJid,
+            channelName: channelCfg.channel_name,
+            sender: triggeringMessage.sender,
+            sessionId,
+          },
+          'amplifier-remote: dispatching to amplifierd',
+        );
+        try {
+          const result = await runAmplifierRemoteAgent(
+            group,
+            {
+              prompt,
+              sessionId,
+              groupFolder: group.folder,
+              chatJid,
+              isMain,
+            },
+            wrappedOnOutput,
+          );
+          return result.status === 'success' ? 'success' : 'error';
+        } catch (err) {
+          logger.error(
+            { chatJid, err: (err as Error).message },
+            'amplifier-remote: runner threw — falling through to claude-agent-sdk',
+          );
+          // Fall through to claude-agent-sdk
+        }
+      } else {
+        logger.warn(
+          {
+            chatJid,
+            channelName: channelCfg.channel_name,
+            sender: triggeringMessage.sender,
+            isFromMe: triggeringMessage.is_from_me,
+            safety,
+          },
+          'amplifier-remote: safety predicate refused — falling through to claude-agent-sdk',
+        );
+      }
+    }
+  }
+  // ─── End engine routing ──────────────────────────────────────────────────
 
   try {
     const output = await runContainerAgent(
