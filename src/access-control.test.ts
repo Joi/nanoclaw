@@ -45,6 +45,29 @@ describe('isDmJid', () => {
     expect(isDmJid('slack:gidc:channel:general')).toBe(false);
     expect(isDmJid('slack:team:channel:random')).toBe(false);
   });
+
+  // Signal: `sig:group:<base64>=` for groups, `sig:<phone-or-uuid>` for DMs
+  // (per src/channels/signal.ts:672 -- the canonical NanoClaw discriminator).
+  // Regression: prior to this fix, the catch-all `!jid.includes(':channel:')`
+  // misclassified Signal groups as DMs, causing the GUEST_REDIRECT_MESSAGE to
+  // fire in real groups (observed in louis-joi 2026-05-05).
+  it('returns false for Signal group JIDs', () => {
+    expect(isDmJid('sig:group:Zq4PgvNe1Zi+6vzbPtFHGaFj7/uYSH/K+gOmK9L4trA=')).toBe(false);
+    expect(isDmJid('sig:group:kfXZv5eENlfVvxRqiRj+sTSgU0FcY5Hqkvoz99ZhnZA=')).toBe(false);
+    expect(isDmJid('sig:group:b5fLBq2GtfJarOtPRYwvw5eyTmbOKwzSTV1FEGunrcs=')).toBe(false);
+  });
+
+  it('returns true for Signal DM JIDs (phone and UUID forms)', () => {
+    expect(isDmJid('sig:+819048411965')).toBe(true);
+    expect(isDmJid('sig:+15109124126')).toBe(true);
+    expect(isDmJid('sig:f139df88-5862-4ff5-b207-fd6a6c121dd7')).toBe(true);
+  });
+
+  it('returns true for Discord DM JIDs and false for Discord channel JIDs', () => {
+    // Lock in the existing Discord branch behavior to prevent regression.
+    expect(isDmJid('dc:dm:1234567890')).toBe(true);
+    expect(isDmJid('dc:913694033031864350:936857224012259339')).toBe(false);
+  });
 });
 
 describe('checkDmAccess', () => {

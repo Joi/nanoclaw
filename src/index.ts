@@ -421,7 +421,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
   if (missedMessages.length === 1) {
     const singleMsg = missedMessages[0];
-    const isDm = !group.isMain && (chatJid.startsWith("line:") ? chatJid.startsWith("line:dm:") : chatJid.startsWith("dc:") ? chatJid.includes(":dm:") : (chatJid.startsWith("tg:") ? !chatJid.startsWith("tg:-") : (chatJid.includes(":D") || !chatJid.includes(":channel:"))));
+    const isDm = !group.isMain && (chatJid.startsWith("line:") ? chatJid.startsWith("line:dm:") : chatJid.startsWith("dc:") ? chatJid.includes(":dm:") : chatJid.startsWith("sig:") ? !chatJid.startsWith("sig:group:") : (chatJid.startsWith("tg:") ? !chatJid.startsWith("tg:-") : (chatJid.includes(":D") || !chatJid.includes(":channel:"))));
 
     // Guest DM enforcement: unregistered users cannot DM jibot
     if (isDm) {

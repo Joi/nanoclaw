@@ -31,6 +31,9 @@ interface IdentityEntry {
 export function isDmJid(jid: string): boolean {
   // Discord: DMs use dc:dm:userId; server channels use dc:guildId:channelId (no ':channel:' either)
   if (jid.startsWith('dc:')) return jid.includes(':dm:');
+  // Signal: groups are sig:group:<base64>=, DMs are sig:<phone-or-uuid>
+  // (per src/channels/signal.ts:672 -- the canonical NanoClaw discriminator)
+  if (jid.startsWith('sig:')) return !jid.startsWith('sig:group:');
   // WhatsApp / Slack: DMs lack ':channel:'
   return !jid.includes(':channel:');
 }
