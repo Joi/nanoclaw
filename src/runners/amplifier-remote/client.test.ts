@@ -211,3 +211,48 @@ describe('executePrompt — prompt size cap (security)', () => {
     }
   });
 });
+
+
+describe('AMPLIFIERD_WORKING_DIR support', () => {
+  it('loads workingDir from credentials.env when present', () => {
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(`
+AMPLIFIERD_API_KEY=k
+AMPLIFIERD_BASE_URL=http://x:8410
+AMPLIFIERD_WORKING_DIR=/Users/joi/workspaces/jibot
+`);
+    const c = loadAmplifierdCreds();
+    expect(c.workingDir).toBe('/Users/joi/workspaces/jibot');
+  });
+
+  it('omits workingDir when not set (backward-compat)', () => {
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(`
+AMPLIFIERD_API_KEY=k
+AMPLIFIERD_BASE_URL=http://x:8410
+`);
+    const c = loadAmplifierdCreds();
+    expect(c.workingDir).toBeUndefined();
+  });
+
+  it('createSession includes working_dir in POST body when set in creds', async () => {
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(`
+AMPLIFIERD_API_KEY=k
+AMPLIFIERD_BASE_URL=http://x:8410
+AMPLIFIERD_WORKING_DIR=/Users/joi/workspaces/jibot
+`);
+    setMockResponse(201, JSON.stringify({ session_id: 'abc' }));
+    await createSession('joi');
+    const body = JSON.parse(capturedRequest!.body);
+    expect(body.working_dir).toBe('/Users/joi/workspaces/jibot');
+  });
+
+  it('createSession omits working_dir when creds has none (backward-compat)', async () => {
+    (fs.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(`
+AMPLIFIERD_API_KEY=k
+AMPLIFIERD_BASE_URL=http://x:8410
+`);
+    setMockResponse(201, JSON.stringify({ session_id: 'abc' }));
+    await createSession('joi');
+    const body = JSON.parse(capturedRequest!.body);
+    expect(body.working_dir).toBeUndefined();
+  });
+});

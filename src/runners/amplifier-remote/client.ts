@@ -34,6 +34,16 @@ import { logger } from '../../logger.js';
 export interface AmplifierdCreds {
   apiKey: string;
   baseUrl: string;
+  /**
+   * Optional starting working_dir for sessions created against this amplifierd.
+   * Set via AMPLIFIERD_WORKING_DIR in credentials.env. When omitted, amplifierd
+   * uses its default (HOME on the amplifierd host).
+   *
+   * Note: this is a string sent verbatim to the remote amplifierd. It refers
+   * to a path on the amplifierd HOST, not on jibotmac. Tools like the joi
+   * bundle's bash tool will run with this as cwd.
+   */
+  workingDir?: string;
 }
 
 /** Default location on jibotmac. Tests override via fs mocking. */
@@ -84,6 +94,7 @@ export function loadAmplifierdCreds(credsPath: string = DEFAULT_CREDS_PATH): Amp
 
   const apiKey = parsed['AMPLIFIERD_API_KEY'];
   const baseUrl = parsed['AMPLIFIERD_BASE_URL'];
+  const workingDir = parsed['AMPLIFIERD_WORKING_DIR']; // optional
 
   if (!apiKey) {
     throw new Error(`AMPLIFIERD_API_KEY not found in ${credsPath}`);
@@ -92,7 +103,7 @@ export function loadAmplifierdCreds(credsPath: string = DEFAULT_CREDS_PATH): Amp
     throw new Error(`AMPLIFIERD_BASE_URL not found in ${credsPath}`);
   }
 
-  _credsCache = { apiKey, baseUrl };
+  _credsCache = workingDir ? { apiKey, baseUrl, workingDir } : { apiKey, baseUrl };
   return _credsCache;
 }
 
@@ -225,6 +236,7 @@ export async function createSession(
 ): Promise<string> {
   const creds = loadAmplifierdCreds();
   const body: Record<string, unknown> = { bundle_name: bundleName };
+  if (creds.workingDir) body.working_dir = creds.workingDir;
   if (metadata) body.metadata = metadata;
 
   let result: HttpResult;
