@@ -20,8 +20,10 @@
  */
 
 import fs from 'fs';
+import http from 'http';
 import os from 'os';
 import path from 'path';
+import { URL } from 'url';
 
 import { logger } from '../../logger.js';
 
@@ -118,34 +120,79 @@ interface ExecuteOptions {
   timeoutMs?: number;
 }
 
-async function authedFetch(
-  pathSuffix: string,
-  init: RequestInit,
-  creds: AmplifierdCreds,
-): Promise<Response> {
-  const url = `${creds.baseUrl}${pathSuffix}`;
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${creds.apiKey}`,
-    'Content-Type': 'application/json',
-    ...((init.headers as Record<string, string>) ?? {}),
-  };
-  return fetch(url, { ...init, headers });
+interface HttpResult {
+  status: number;
+  body: string;
 }
 
-async function readErrorMessage(res: Response): Promise<string> {
+/**
+ * POST JSON to amplifierd. Uses node:http directly (NOT globalThis.fetch)
+ * because the long-running NanoClaw process surfaced "fetch failed" errors
+ * from undici's shared keep-alive pool getting into a bad state. node:http
+ * with a fresh ad-hoc Agent eliminates that class of issue. Same idiom as
+ * src/agent-api.ts uses for its existing HTTP server.
+ */
+function postJson(
+  pathSuffix: string,
+  bodyObj: unknown,
+  creds: AmplifierdCreds,
+  timeoutMs: number = 90_000,
+): Promise<HttpResult> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(creds.baseUrl + pathSuffix);
+    const body = JSON.stringify(bodyObj);
+    const opts: http.RequestOptions = {
+      hostname: u.hostname,
+      port: u.port || 80,
+      path: u.pathname + u.search,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${creds.apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'Accept': 'application/json',
+      },
+      // Fresh Agent — no shared connection pool state across calls.
+      agent: new http.Agent({ keepAlive: false }),
+      timeout: timeoutMs,
+    };
+    const req = http.request(opts, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const respBody = Buffer.concat(chunks).toString('utf-8');
+        resolve({ status: res.statusCode ?? 0, body: respBody });
+      });
+      res.on('error', (err) => reject(err));
+    });
+    req.on('timeout', () => {
+      req.destroy(new Error(`amplifierd request timed out after ${timeoutMs}ms`));
+    });
+    req.on('error', (err) => {
+      // Surface the FULL error including code (ECONNREFUSED, ENETUNREACH, EHOSTUNREACH, etc.)
+      const code = (err as NodeJS.ErrnoException).code;
+      reject(new Error(`${err.message}${code ? ` [${code}]` : ''}`));
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+function extractErrorDetail(body: string, fallback: string): string {
+  if (!body) return fallback;
   try {
-    const body = await res.text();
-    try {
-      const json = JSON.parse(body);
-      if (typeof json.detail === 'string') return json.detail;
-      if (typeof json.error === 'string') return json.error;
-    } catch {
-      /* not JSON, fall through */
+    const json = JSON.parse(body);
+    if (typeof json.detail === 'string') return json.detail;
+    if (json.detail && typeof json.detail === 'object') {
+      // RFC 7807 Problem Details from amplifierd
+      if (typeof json.detail.detail === 'string') return json.detail.detail;
+      if (typeof json.detail.title === 'string') return json.detail.title;
     }
-    return body || res.statusText;
+    if (typeof json.error === 'string') return json.error;
   } catch {
-    return res.statusText;
+    /* not JSON */
   }
+  return body.slice(0, 500);
 }
 
 /**
@@ -160,21 +207,26 @@ export async function createSession(
   const body: Record<string, unknown> = { bundle_name: bundleName };
   if (metadata) body.metadata = metadata;
 
-  let res: Response;
+  let result: HttpResult;
   try {
-    res = await authedFetch('/sessions', { method: 'POST', body: JSON.stringify(body) }, creds);
+    result = await postJson('/sessions', body, creds, 30_000);
   } catch (err) {
     throw new Error(`amplifierd network error on createSession: ${(err as Error).message}`);
   }
 
-  if (!res.ok) {
-    const detail = await readErrorMessage(res);
-    throw new Error(`amplifierd ${res.status} on createSession: ${detail}`);
+  if (result.status < 200 || result.status >= 300) {
+    const detail = extractErrorDetail(result.body, `HTTP ${result.status}`);
+    throw new Error(`amplifierd ${result.status} on createSession: ${detail}`);
   }
 
-  const data = (await res.json()) as CreateSessionResponse;
+  let data: CreateSessionResponse;
+  try {
+    data = JSON.parse(result.body) as CreateSessionResponse;
+  } catch {
+    throw new Error(`amplifierd createSession returned non-JSON: ${result.body.slice(0, 200)}`);
+  }
   if (!data.session_id) {
-    throw new Error(`amplifierd createSession returned no session_id (response shape: ${JSON.stringify(data)})`);
+    throw new Error(`amplifierd createSession returned no session_id (response shape: ${result.body.slice(0, 200)})`);
   }
   logger.debug({ sessionId: data.session_id, bundleName }, 'amplifier-remote: session created');
   return data.session_id;
@@ -192,34 +244,31 @@ export async function executePrompt(
   const creds = loadAmplifierdCreds();
   const timeoutMs = opts.timeoutMs ?? 90_000;
 
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-
-  let res: Response;
+  let result: HttpResult;
   try {
-    res = await authedFetch(
+    result = await postJson(
       `/sessions/${encodeURIComponent(sessionId)}/execute`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ prompt }),
-        signal: ctrl.signal,
-      },
+      { prompt },
       creds,
+      timeoutMs,
     );
   } catch (err) {
-    clearTimeout(timer);
     throw new Error(`amplifierd network error on executePrompt: ${(err as Error).message}`);
   }
-  clearTimeout(timer);
 
-  if (!res.ok) {
-    const detail = await readErrorMessage(res);
-    throw new Error(`amplifierd ${res.status} on executePrompt: ${detail}`);
+  if (result.status < 200 || result.status >= 300) {
+    const detail = extractErrorDetail(result.body, `HTTP ${result.status}`);
+    throw new Error(`amplifierd ${result.status} on executePrompt: ${detail}`);
   }
 
-  const data = (await res.json()) as ExecuteResponse;
+  let data: ExecuteResponse;
+  try {
+    data = JSON.parse(result.body) as ExecuteResponse;
+  } catch {
+    throw new Error(`amplifierd executePrompt returned non-JSON: ${result.body.slice(0, 200)}`);
+  }
   if (typeof data.response !== 'string') {
-    throw new Error(`amplifierd executePrompt returned unexpected shape (no 'response' field): ${JSON.stringify(data)}`);
+    throw new Error(`amplifierd executePrompt returned unexpected shape (no 'response' field): ${JSON.stringify(data).slice(0, 200)}`);
   }
   return { response: data.response };
 }
