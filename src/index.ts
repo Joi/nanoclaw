@@ -104,6 +104,8 @@ import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { loadChannelConfigs, getQmdPorts, getListeningMode, getChannelConfig, getSenderPolicy, getAccessFlags,
 } from './channel-config.js';
+import { runAmplifierRemoteAgent, isAmplifierRemoteAllowed } from './runners/amplifier-remote/index.js';
+import { detectBareUrl, intakeUrl, formatIntakeReply } from './url-intake.js';
 import { writeIntakeFile } from './intake.js';
 import { shouldRunIntake } from './intake-routing.js';
 import { parseGidcCommand } from './gidc-commands.js';
@@ -563,6 +565,68 @@ ${prompt}`
   let hadError = false;
   let outputSentToUser = false;
 
+  // Pick the latest non-bot message in the batch as the safety predicate input
+  // for amplifier-remote dispatch (joi-1l51). For the claude-agent-sdk path this is
+  // ignored. For 1:1 DMs there's only one possible non-bot sender.
+  const triggeringMsg = [...missedMessages].reverse().find((m) => !m.is_from_me);
+
+  // ─── Bare-URL auto-intake (joi-k1x9) ─────────────────────────────────────
+  // If the channel YAML opts in via `auto_url_intake: true` AND the batch is
+  // exactly one non-bot message that is a bare URL (whitespace + http(s) URL
+  // + whitespace, nothing else), file the URL to the knowledge-intake sprite
+  // and short-circuit the agent dispatch. The user gets a brief confirmation
+  // reply with the extracted title + classification.
+  //
+  // Multi-message batches and URLs-with-text fall through to the agent.
+  // The 3-min jibrain-hook batch still fires (raw-message capture) — that
+  // duplication is acceptable for the canary; deduping is joi-k1x9 follow-up.
+  const intakeChannelCfg = getChannelConfig(chatJid, channelConfigs);
+  if (
+    intakeChannelCfg?.auto_url_intake === true &&
+    triggeringMsg &&
+    missedMessages.filter((m) => !m.is_from_me).length === 1
+  ) {
+    const bareUrl = detectBareUrl(triggeringMsg.content);
+    if (bareUrl) {
+      logger.info(
+        { chatJid, channelName: intakeChannelCfg.channel_name, url: bareUrl, sender: triggeringMsg.sender },
+        'auto-url-intake: bare URL detected, filing to knowledge-intake (skipping agent dispatch)',
+      );
+      await channel.setTyping?.(chatJid, true);
+      try {
+        const intakeResult = await intakeUrl(bareUrl);
+        const reply = formatIntakeReply(intakeResult, bareUrl);
+        await channel.sendMessage(chatJid, reply);
+        if (intakeResult.error) {
+          logger.warn(
+            { chatJid, url: bareUrl, err: intakeResult.error },
+            'auto-url-intake: knowledge-intake returned error',
+          );
+        } else {
+          logger.info(
+            { chatJid, url: bareUrl, title: intakeResult.title, file_path: intakeResult.file_path },
+            'auto-url-intake: filed successfully',
+          );
+        }
+      } catch (err) {
+        // Defensive — intakeUrl never throws (returns { error } on failure),
+        // but if some unexpected exception bubbles up, surface a generic reply
+        // and continue (do NOT fall through to the agent — user might think
+        // their URL got two replies).
+        const msg = (err as Error).message;
+        logger.error(
+          { chatJid, url: bareUrl, err: msg },
+          'auto-url-intake: unexpected exception during intake',
+        );
+        await channel.sendMessage(chatJid, `URL intake failed unexpectedly: ${msg.slice(0, 200)}`);
+      } finally {
+        await channel.setTyping?.(chatJid, false);
+      }
+      return true; // success — skip the agent dispatch path entirely
+    }
+  }
+  // ─── End bare-URL auto-intake ─────────────────────────────────────────────
+
   const output = await runAgent(group, enrichedPrompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
@@ -601,7 +665,7 @@ ${prompt}`
     if (result.status === 'error') {
       hadError = true;
     }
-  });
+  }, triggeringMsg);
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -634,6 +698,13 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  /**
+   * Latest non-bot message in the batch — required for amplifier-remote
+   * safety predicate (Layer 4: sender allowlist + !is_from_me).
+   * If undefined, amplifier-remote dispatch is skipped (falls through to
+   * claude-agent-sdk). Added 2026-05-05 for joi-1l51.
+   */
+  triggeringMessage?: NewMessage,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
@@ -687,6 +758,68 @@ async function runAgent(
   if (process.env.JIBOT_INTERNAL_SECRET) {
     extraEnv.JIBOT_INTERNAL_SECRET = process.env.JIBOT_INTERNAL_SECRET;
   }
+
+  // ─── Engine routing: amplifier-remote ────────────────────────────────────
+  // Added 2026-05-05 for joi-1l51 (NanoClaw → remote Amplifier session pipe).
+  // If the channel YAML has `engine: amplifier-remote` AND the 4-layer safety
+  // predicate passes, route to amplifierd over HTTP instead of the local
+  // claude-agent-sdk container. Any failure (predicate refusal, runner error)
+  // falls through to the existing claude-agent-sdk path with a warn log —
+  // the user always gets a response.
+  const channelCfg = getChannelConfig(chatJid, channelConfigs);
+  if (channelCfg?.engine === 'amplifier-remote') {
+    if (!triggeringMessage) {
+      logger.warn(
+        { chatJid, channelName: channelCfg.channel_name },
+        'amplifier-remote: no triggeringMessage passed to runAgent — falling through to claude-agent-sdk',
+      );
+    } else {
+      const safety = isAmplifierRemoteAllowed(channelCfg, triggeringMessage);
+      if (safety.ok) {
+        logger.info(
+          {
+            chatJid,
+            channelName: channelCfg.channel_name,
+            sender: triggeringMessage.sender,
+            sessionId,
+          },
+          'amplifier-remote: dispatching to amplifierd',
+        );
+        try {
+          const result = await runAmplifierRemoteAgent(
+            group,
+            {
+              prompt,
+              sessionId,
+              groupFolder: group.folder,
+              chatJid,
+              isMain,
+            },
+            wrappedOnOutput,
+          );
+          return result.status === 'success' ? 'success' : 'error';
+        } catch (err) {
+          logger.error(
+            { chatJid, err: (err as Error).message },
+            'amplifier-remote: runner threw — falling through to claude-agent-sdk',
+          );
+          // Fall through to claude-agent-sdk
+        }
+      } else {
+        logger.warn(
+          {
+            chatJid,
+            channelName: channelCfg.channel_name,
+            sender: triggeringMessage.sender,
+            isFromMe: triggeringMessage.is_from_me,
+            safety,
+          },
+          'amplifier-remote: safety predicate refused — falling through to claude-agent-sdk',
+        );
+      }
+    }
+  }
+  // ─── End engine routing ──────────────────────────────────────────────────
 
   try {
     const output = await runContainerAgent(

@@ -10,6 +10,8 @@ import {
   getFloorLevel,
   getDomainGrants,
   getQmdPorts,
+  getEngine,
+  getAllowedSenders,
 } from './channel-config.js';
 
 vi.mock('./logger.js', () => ({
@@ -243,5 +245,132 @@ members: {}
       'domain-bhutan': 7337,
       'domain-gmc': 7338,
     });
+  });
+});
+
+
+// =============================================================================
+// Engine routing + allowed_senders (joi-1l51 — NanoClaw → remote Amplifier pipe)
+// =============================================================================
+
+describe('engine + allowed_senders parsing', () => {
+  it('defaults engine to claude-agent-sdk when missing', () => {
+    writeConfig('signal-default.yaml', `
+platform: signal
+channel_id: "sig:+1234"
+channel_name: default-test
+floor: guest
+listening_mode: attentive
+members: {}
+`);
+    const configs = loadChannelConfigs(tmpDir);
+    const cfg = configs.get('sig:+1234');
+    expect(cfg).toBeDefined();
+    expect(cfg!.engine).toBe('claude-agent-sdk');
+  });
+
+  it('accepts engine: amplifier-remote', () => {
+    writeConfig('signal-amp.yaml', `
+platform: signal
+channel_id: "sig:+819048411965"
+channel_name: joi-dm
+floor: owner
+listening_mode: active
+engine: amplifier-remote
+allowed_senders:
+  - "+819048411965"
+members:
+  joi:
+    tier: owner
+`);
+    const configs = loadChannelConfigs(tmpDir);
+    const cfg = configs.get('sig:+819048411965');
+    expect(cfg).toBeDefined();
+    expect(cfg!.engine).toBe('amplifier-remote');
+    expect(cfg!.allowed_senders).toEqual(['+819048411965']);
+  });
+
+  it('rejects unknown engine values back to default', () => {
+    writeConfig('signal-bogus.yaml', `
+platform: signal
+channel_id: "sig:+5555"
+channel_name: bogus
+floor: guest
+listening_mode: attentive
+engine: random-thing
+members: {}
+`);
+    const configs = loadChannelConfigs(tmpDir);
+    const cfg = configs.get('sig:+5555');
+    expect(cfg!.engine).toBe('claude-agent-sdk');
+  });
+
+  it('rejects non-array allowed_senders to empty array', () => {
+    writeConfig('signal-bad-senders.yaml', `
+platform: signal
+channel_id: "sig:+6666"
+channel_name: bad-test
+floor: owner
+listening_mode: active
+engine: amplifier-remote
+allowed_senders: "not-an-array"
+members: {}
+`);
+    const configs = loadChannelConfigs(tmpDir);
+    const cfg = configs.get('sig:+6666');
+    expect(cfg!.allowed_senders).toEqual([]);
+  });
+});
+
+describe('getEngine', () => {
+  it('returns claude-agent-sdk for unknown JID (safe default)', () => {
+    const configs = new Map<string, ChannelConfig>();
+    expect(getEngine('sig:+nonexistent', configs)).toBe('claude-agent-sdk');
+  });
+
+  it('returns the configured engine when set', () => {
+    const configs = new Map<string, ChannelConfig>([
+      ['sig:+819048411965', {
+        platform: 'signal', workspace: '', channel_id: 'sig:+819048411965',
+        channel_name: 'joi-dm', floor: 'owner', domains: [],
+        listening_mode: 'active', sender_policy: 'allow',
+        access: { reminders: false, bookmarks: false, email: false, calendar: false, file_serving: false, intake: false },
+        members: {}, engine: 'amplifier-remote', allowed_senders: ['+819048411965'],
+      }],
+    ]);
+    expect(getEngine('sig:+819048411965', configs)).toBe('amplifier-remote');
+  });
+});
+
+describe('getAllowedSenders', () => {
+  it('returns empty array for unknown JID (fail-closed default)', () => {
+    const configs = new Map<string, ChannelConfig>();
+    expect(getAllowedSenders('sig:+nonexistent', configs)).toEqual([]);
+  });
+
+  it('returns the configured allowed_senders list', () => {
+    const configs = new Map<string, ChannelConfig>([
+      ['sig:+819048411965', {
+        platform: 'signal', workspace: '', channel_id: 'sig:+819048411965',
+        channel_name: 'joi-dm', floor: 'owner', domains: [],
+        listening_mode: 'active', sender_policy: 'allow',
+        access: { reminders: false, bookmarks: false, email: false, calendar: false, file_serving: false, intake: false },
+        members: {}, engine: 'amplifier-remote', allowed_senders: ['+819048411965', '+155500001'],
+      }],
+    ]);
+    expect(getAllowedSenders('sig:+819048411965', configs)).toEqual(['+819048411965', '+155500001']);
+  });
+
+  it('returns empty array when allowed_senders is missing', () => {
+    const configs = new Map<string, ChannelConfig>([
+      ['sig:+nooneset', {
+        platform: 'signal', workspace: '', channel_id: 'sig:+nooneset',
+        channel_name: 'no-senders', floor: 'guest', domains: [],
+        listening_mode: 'attentive', sender_policy: 'allow',
+        access: { reminders: false, bookmarks: false, email: false, calendar: false, file_serving: false, intake: false },
+        members: {},
+      }],
+    ]);
+    expect(getAllowedSenders('sig:+nooneset', configs)).toEqual([]);
   });
 });

@@ -56,6 +56,36 @@ export interface ChannelConfig {
    */
   capture_mode?: 'standalone' | 'digest';
   members: Record<string, { tier: string; person_ref?: string }>;
+
+  /**
+   * Engine routing (added 2026-05-05 for joi-1l51 — NanoClaw → remote Amplifier session pipe).
+   * - 'claude-agent-sdk' (default): existing behavior, runs in podman/docker container locally.
+   * - 'amplifier-remote': forwards prompts to amplifierd over HTTP (e.g. macazbd via ZeroTier).
+   *
+   * Dispatched ONLY if the 4-layer safety predicate in
+   * src/runners/amplifier-remote/safety.ts passes:
+   *   (1) engine === 'amplifier-remote'
+   *   (2) floor === 'owner'
+   *   (3) channel_name ends in -dm AND chat_jid matches a DM JID prefix
+   *   (4) sender ∈ allowed_senders AND !is_from_me AND allowed_senders non-empty
+   * Any failure falls through to the claude-agent-sdk path with a warn log.
+   */
+  engine?: 'claude-agent-sdk' | 'amplifier-remote';
+
+  /**
+   * Allowed senders for amplifier-remote (REQUIRED when engine=amplifier-remote;
+   * empty/missing rejects all messages — refuse-by-default fail-closed semantics).
+   * Format: platform-native sender ID, e.g. '+819048411965' for Signal.
+   */
+  allowed_senders?: string[];
+  /**
+   * Auto-file bare URLs (whitespace + URL + whitespace, nothing else) to the
+   * knowledge-intake sprite. When true, single-message batches that ARE a bare
+   * URL get intercepted: NanoClaw POSTs to the sprite, replies with a brief
+   * confirmation, and skips the agent dispatch entirely. Default false.
+   * Added 2026-05-06 for joi-k1x9 prompt-chain redesign.
+   */
+  auto_url_intake?: boolean;
 }
 
 /** Port mapping for access-tiered QMD MCP services.
@@ -139,6 +169,30 @@ export function loadChannelConfigs(
       // Apply sender_policy default
       if (!parsed.sender_policy) {
         parsed.sender_policy = 'allow';
+      }
+
+      // Validate engine (added 2026-05-05 for joi-1l51).
+      // Default to 'claude-agent-sdk' for backward compat. Unknown values reject to default.
+      const engineRaw = parsed.engine === undefined ? 'claude-agent-sdk' : String(parsed.engine);
+      if (!['claude-agent-sdk', 'amplifier-remote'].includes(engineRaw)) {
+        logger.warn({ file, engine: engineRaw }, 'channel-config: unknown engine, defaulting to "claude-agent-sdk"');
+        parsed.engine = 'claude-agent-sdk';
+      } else {
+        parsed.engine = engineRaw as ChannelConfig['engine'];
+      }
+
+      // Validate allowed_senders (only meaningful when engine=amplifier-remote).
+      if (parsed.allowed_senders !== undefined && !Array.isArray(parsed.allowed_senders)) {
+        logger.warn({ file, allowed_senders: parsed.allowed_senders }, 'channel-config: allowed_senders must be array, ignoring');
+        parsed.allowed_senders = [];
+      }
+      if (parsed.engine === 'amplifier-remote') {
+        if (!parsed.allowed_senders || parsed.allowed_senders.length === 0) {
+          logger.warn({ file, channel_name: parsed.channel_name }, 'channel-config: engine=amplifier-remote with empty allowed_senders — runner will refuse all messages (fail-closed)');
+        }
+        if (parsed.floor !== 'owner') {
+          logger.warn({ file, floor: parsed.floor, channel_name: parsed.channel_name }, 'channel-config: engine=amplifier-remote requires floor=owner — runner will refuse all dispatch');
+        }
       }
 
       // Build JID key.
@@ -316,4 +370,42 @@ export function getSenderPolicy(
 ): 'allow' | 'trigger' | 'drop' {
   const config = configs.get(jid);
   return config?.sender_policy ?? 'allow';
+}
+
+/**
+ * Get the engine for a channel (added 2026-05-05 for joi-1l51).
+ * Returns 'claude-agent-sdk' (default) unless the channel YAML opts into
+ * 'amplifier-remote'. Note: this is the *configured* engine. The actual
+ * dispatch is gated by the 4-layer safety predicate in
+ * src/runners/amplifier-remote/safety.ts.
+ */
+export function getEngine(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): 'claude-agent-sdk' | 'amplifier-remote' {
+  return configs.get(jid)?.engine ?? 'claude-agent-sdk';
+}
+
+/**
+ * Get the allowed_senders list for amplifier-remote dispatch (added 2026-05-05 for joi-1l51).
+ * Returns empty array when missing — fail-closed default that causes the
+ * safety predicate to refuse all amplifier-remote dispatches.
+ */
+export function getAllowedSenders(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): string[] {
+  return configs.get(jid)?.allowed_senders ?? [];
+}
+
+/**
+ * Whether this channel should auto-file bare URLs to knowledge-intake.
+ * Defaults to false. Set `auto_url_intake: true` in YAML to opt in.
+ * Added 2026-05-06 for joi-k1x9.
+ */
+export function getAutoUrlIntake(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): boolean {
+  return configs.get(jid)?.auto_url_intake === true;
 }
