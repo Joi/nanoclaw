@@ -10,13 +10,33 @@ module-based architecture.
 |---|---|
 | Tier 1 #1 — amplifier-remote provider | **Done** (commit `57947b0`). Bun-side tests need `bun test` on a host with bun. |
 | Tier 1 #2 — bare-URL auto-intake | **Done** (commit `cc152b5`). |
-| Tier 2 — channel customizations | Not started. Each channel needs `/add-<name>` skill install first. |
+| Tier 2 — channel installs (Phase A) | **Done** (commits `2879341` Signal, `3a44406` Telegram, `6246e07` WhatsApp, `69bec26` Slack, `e153238` Discord, `271fb74` LINE). Per-channel summary below. |
 | Tier 3 — email pipeline | Not started; treat as separate project. |
-| Tier 4 — container hardening | **Done** (commits `3a302ce` + `4a95ba0`). seccomp + cap-drop + setuid-strip + no-new-privileges + `--read-only` + tmpfs. Smoke-test path documented below. |
+| Tier 4 — container hardening | **Done** (commits `3a302ce` + `4a95ba0`). seccomp + cap-drop + setuid-strip + no-new-privileges + `--read-only` + tmpfs. Smoke-test path: see CUTOVER.md. |
 | Tier 5 — orchestrator survivors | **Audited** (commit `1f8e962`). 6 files obsolete in 2.0; 5 deferred to user follow-up. See "Tier 5 audit" section below. |
 | Tier 6 — script-level features | No port needed; verify on cutover. |
 
-**Production cutover blockers cleared:** Tier 1 (custom provider + intake) and Tier 4 (security posture) are landed. Run `scripts/test-af-alg-block.sh` and `bun test` against `container/agent-runner/` before flipping production.
+**Production cutover blockers cleared.** Validation steps and step-by-step cutover procedure live in `_legacy/CUTOVER.md`.
+
+### Tier 2 per-channel summary
+
+| Channel | Adapter source | npm dep | 1.x customizations |
+|---|---|---|---|
+| Signal | upstream/channels (full native, 983 lines + 37 tests) | none | mention expansion already covered by upstream's `resolveMentions()` (TCP/JSON-RPC mode includes name in payload) |
+| Telegram | upstream/channels (245 lines + helpers + 41 tests) | `@chat-adapter/telegram@4.27.0` | isDm group-chat fix already covered by `isGroupPlatformId(platformId)` at adapter level |
+| WhatsApp | upstream/channels (777 lines, native Baileys) | Baileys + qrcode + pino | 120s init-query timeout **ported**; `@lid` JID handling obsolete (upstream has full `translateJid()` resolver) |
+| Slack | upstream/channels (30-line bridge stub + ported `slack-mentions.ts`, 110 lines + 16 tests) | `@chat-adapter/slack@4.27.0` | Multi-alias outgoing-mention compaction **ported** via `transformOutboundText`; PDF attachment text extraction **deferred** (no inbound-attachment hook on bridge) |
+| Discord | upstream/channels (38-line bridge stub) | `@chat-adapter/discord@4.27.0` | All 1.x mention/JID fixes either obsolete or pending empirical test post-cutover (SDK may already cover) |
+| LINE | **fresh-authored in this fork** (`src/channels/line.ts`, 310 lines + 21 tests) | none | Reimplemented from scratch for 2.0 — no upstream skill, no `@chat-adapter/line` exists. Platform-ID scheme changed to symmetric `line:user:` / `line:group:` / `line:room:`. |
+
+**Repeated npm-hoisting fix:** every Chat-SDK-bridged adapter (`@chat-adapter/{telegram,slack,discord}`) was bumped from the SKILL.md's pinned 4.26.0 to 4.27.0 to match the root `chat@^4.24.0` resolution. Otherwise npm would hoist a 4.27.0 root and the adapter package would bring its own nested 4.26.0, producing a `chat`-package type clash at compile.
+
+**Customizations explicitly NOT ported (with rationale in commits):**
+- WhatsApp `@lid` ownsJid hack — superseded by upstream `translateJid()`
+- Telegram isDm fix — superseded by upstream `isGroupPlatformId()`
+- Discord `dc:` JID auto-construction — touched the deleted `src/channel-config.ts`
+- Slack PDF text extraction — deferred until the bridge gains an inbound-attachment hook
+- Discord outbound mention compaction — deferred pending empirical test (SDK may cover)
 
 ## What just happened
 
@@ -183,25 +203,28 @@ git diff 226b520..pre-2.0-merge -- src/runners/
 
 1. ~~**amplifier-remote** (Tier 1 #1+3)~~ — **Done** (commit `57947b0`).
 2. ~~**bare-URL intake** (Tier 1 #2)~~ — **Done** (commit `cc152b5`).
-3. ~~**container hardening** (Tier 4)~~ — **Done partial** (commit `3a302ce`); `--read-only` + tmpfs follow-up after smoke test.
-4. ~~**Tier 5 audit**~~ — **Done**: 6 obsolete, 5 deferred. See "Tier 5" section above.
-5. **install needed channels via `/add-<name>`** then port channel-internal fixes (Tier 2). Interactive — start when the user is ready to drive each channel install.
-6. **email pipeline** (Tier 3) — large project, schedule separately.
+3. ~~**container hardening** (Tier 4)~~ — **Done** (commits `3a302ce` + `4a95ba0`).
+4. ~~**Tier 5 audit**~~ — **Done** (commit `1f8e962`): 6 obsolete, 5 deferred.
+5. ~~**Channel installs** (Tier 2 Phase A)~~ — **Done**: Signal, Telegram, WhatsApp, Slack, Discord, LINE.
+6. **Cutover** — see `_legacy/CUTOVER.md` for the runbook.
+7. **email pipeline** (Tier 3) — large project, schedule separately. Not blocking cutover; production already runs without 2.0 email.
 
 ## Production cutover
 
 Production NanoClaw still runs from `~/nanoclaw` (on `main`, untouched).
 This worktree is `~/nanoclaw-merge` on `chore/upstream-merge-2026-05`.
 
-**Cutover blockers — current status:**
+**Cutover blockers — all cleared:**
 
 | Blocker | State |
 |---|---|
-| Tier 1 #1 (amplifier-remote) — without it the existing automation breaks | Done (`57947b0`). Validate with `cd container/agent-runner && bun test` before cutover. |
-| Tier 1 #2 (URL auto-intake) — daily quality-of-life | Done (`cc152b5`). Set `INTAKE_ENABLED_PLATFORM_IDS` in env to activate post-cutover. |
-| Tier 4 (security posture) — refusing to regress on CVE-2026-31431 | Done partial (`3a302ce`). Run `scripts/test-af-alg-block.sh` on jibotmac after the image rebuild. |
-| Channel installs (Tier 2) | Pending. Each channel needs `/add-<name>` skill install + porting of its specific 1.x customizations. |
+| Tier 1 #1 (amplifier-remote) | Done (`57947b0`). Validate with `cd container/agent-runner && bun test` pre-cutover. |
+| Tier 1 #2 (URL auto-intake) | Done (`cc152b5`). Set `INTAKE_ENABLED_PLATFORM_IDS` in env to activate post-cutover. |
+| Tier 4 (security posture) | Done (`3a302ce` + `4a95ba0`). Run `scripts/test-af-alg-block.sh` on jibotmac after image rebuild. |
+| Channel installs (Tier 2 Phase A) | Done — Signal, Telegram, WhatsApp, Slack, Discord, LINE. |
 
-Cutover is technically unblocked once channels are installed; the deferred
-Tier 5 niches (voice bridge, self-registration, people-context, reminders,
-remote-control) are not on the critical path.
+Cutover procedure: `_legacy/CUTOVER.md`.
+
+Deferred Tier 5 niches (voice bridge, self-registration, people-context,
+reminders, remote-control) are not on the critical path; pick them up as
+discrete follow-ups once 2.0 is running in production.
