@@ -74,6 +74,15 @@ export interface ChatSdkBridgeConfig {
    * and reactions still target the head of the reply.
    */
   maxTextLength?: number;
+  /**
+   * Override the bridge's channelType (and webhook path). When omitted the
+   * bridge uses `adapter.name` — fine for single-instance channels. Required
+   * to run multiple instances of the same SDK adapter (e.g. multiple Slack
+   * workspaces) so each instance registers under a distinct channelType in
+   * the host registry and at a distinct `/webhook/<channelType>` path.
+   * Logs still report `adapter: adapter.name` for SDK-internal context.
+   */
+  channelType?: string;
 }
 
 /**
@@ -192,9 +201,10 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     };
   }
 
+  const channelType = config.channelType ?? adapter.name;
   const bridge: ChannelAdapter = {
     name: adapter.name,
-    channelType: adapter.name,
+    channelType,
     supportsThreads: config.supportsThreads,
 
     async setup(hostConfig: ChannelSetup) {
@@ -242,7 +252,10 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       chat.onDirectMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
         log.info('Inbound DM received', {
-          adapter: adapter.name,
+          // Report the bridge's channelType (e.g. slack-cit) rather than the
+          // SDK adapter.name (e.g. "slack") so multi-instance deployments
+          // can tell which workspace a DM landed in from the log alone.
+          adapter: channelType,
           channelId,
           sender: (message.author as any)?.fullName ?? (message.author as any)?.userId ?? 'unknown',
           threadId: thread.id,
@@ -343,8 +356,11 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         startGateway();
         log.info('Gateway listener started', { adapter: adapter.name });
       } else {
-        // Non-gateway adapters (Slack, Teams, GitHub, etc.) — register on the shared webhook server
-        registerWebhookAdapter(chat, adapter.name);
+        // Non-gateway adapters (Slack, Teams, GitHub, etc.) — register on the
+        // shared webhook server. Use channelType so multi-instance channels
+        // (e.g. Slack workspaces 2/3/4) get distinct /webhook/<channelType>
+        // paths instead of all colliding on /webhook/slack.
+        registerWebhookAdapter(chat, channelType);
       }
 
       log.info('Chat SDK bridge initialized', { adapter: adapter.name });
