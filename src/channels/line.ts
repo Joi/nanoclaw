@@ -273,6 +273,13 @@ class LineChannelAdapter implements ChannelAdapter {
       content: { text: event.message.text, sender: senderName, senderId: senderUserId ?? null },
       timestamp,
       isGroup,
+      // DMs are by definition addressed to the bot — same convention as the
+      // Signal and WhatsApp native adapters. Without this flag, routeInbound
+      // treats DMs as plain chatter and silently drops them at line 209
+      // (`if (!isMention) return`). Group/room mention detection (LINE's
+      // message.mention.mentionees with isSelf) is a future enhancement;
+      // until then groups require explicit DM-style addressing.
+      isMention: !isGroup ? true : undefined,
     });
   }
 
