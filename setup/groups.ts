@@ -1,5 +1,7 @@
 /**
- * Step: groups — Connect to WhatsApp, fetch group metadata, write to DB.
+ * Step: groups — Fetch group metadata from messaging platforms, write to DB.
+ * WhatsApp requires an upfront sync (Baileys groupFetchAllParticipating).
+ * Other channels discover group names at runtime — this step auto-skips for them.
  * Replaces 05-sync-groups.sh + 05b-list-groups.sh
  */
 import { execSync } from 'child_process';
@@ -9,7 +11,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../src/config.js';
-import { logger } from '../src/logger.js';
+import { log } from '../src/log.js';
 import { emitStatus } from './status.js';
 
 function parseArgs(args: string[]): { list: boolean; limit: number } {
@@ -17,7 +19,10 @@ function parseArgs(args: string[]): { list: boolean; limit: number } {
   let limit = 30;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--list') list = true;
-    if (args[i] === '--limit' && args[i + 1]) { limit = parseInt(args[i + 1], 10); i++; }
+    if (args[i] === '--limit' && args[i + 1]) {
+      limit = parseInt(args[i + 1], 10);
+      i++;
+    }
   }
   return { list, limit };
 }
@@ -43,12 +48,14 @@ async function listGroups(limit: number): Promise<void> {
   }
 
   const db = new Database(dbPath, { readonly: true });
-  const rows = db.prepare(
-    `SELECT jid, name FROM chats
+  const rows = db
+    .prepare(
+      `SELECT jid, name FROM chats
      WHERE jid LIKE '%@g.us' AND jid <> '__group_sync__' AND name <> jid
      ORDER BY last_message_time DESC
      LIMIT ?`,
-  ).all(limit) as Array<{ jid: string; name: string }>;
+    )
+    .all(limit) as Array<{ jid: string; name: string }>;
   db.close();
 
   for (const row of rows) {
@@ -57,18 +64,37 @@ async function listGroups(limit: number): Promise<void> {
 }
 
 async function syncGroups(projectRoot: string): Promise<void> {
+  // Only WhatsApp needs an upfront group sync; other channels resolve names at runtime.
+  // Detect WhatsApp by checking for auth credentials on disk.
+  const authDir = path.join(projectRoot, 'store', 'auth');
+  const hasWhatsAppAuth =
+    fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
+
+  if (!hasWhatsAppAuth) {
+    log.info('WhatsApp auth not found — skipping group sync');
+    emitStatus('SYNC_GROUPS', {
+      BUILD: 'skipped',
+      SYNC: 'skipped',
+      GROUPS_IN_DB: 0,
+      REASON: 'whatsapp_not_configured',
+      STATUS: 'success',
+      LOG: 'logs/setup.log',
+    });
+    return;
+  }
+
   // Build TypeScript first
-  logger.info('Building TypeScript');
+  log.info('Building TypeScript');
   let buildOk = false;
   try {
-    execSync('npm run build', {
+    execSync('pnpm run build', {
       cwd: projectRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     buildOk = true;
-    logger.info('Build succeeded');
+    log.info('Build succeeded');
   } catch {
-    logger.error('Build failed');
+    log.error('Build failed');
     emitStatus('SYNC_GROUPS', {
       BUILD: 'failed',
       SYNC: 'skipped',
@@ -80,8 +106,8 @@ async function syncGroups(projectRoot: string): Promise<void> {
     process.exit(1);
   }
 
-  // Run inline sync script via node
-  logger.info('Fetching group metadata');
+  // Run sync script via a temp file to avoid shell escaping issues with node -e
+  log.info('Fetching group metadata');
   let syncOk = false;
   try {
     const syncScript = `
@@ -153,16 +179,22 @@ sock.ev.on('connection.update', async (update) => {
 });
 `;
 
-    const output = execSync(`node --input-type=module -e ${JSON.stringify(syncScript)}`, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      timeout: 45000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    syncOk = output.includes('SYNCED:');
-    logger.info({ output: output.trim() }, 'Sync output');
+    const tmpScript = path.join(projectRoot, '.tmp-group-sync.mjs');
+    fs.writeFileSync(tmpScript, syncScript, 'utf-8');
+    try {
+      const output = execSync(`node ${tmpScript}`, {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 45000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      syncOk = output.includes('SYNCED:');
+      log.info('Sync output', { output: output.trim() });
+    } finally {
+      try { fs.unlinkSync(tmpScript); } catch { /* ignore cleanup errors */ }
+    }
   } catch (err) {
-    logger.error({ err }, 'Sync failed');
+    log.error('Sync failed', { err });
   }
 
   // Count groups in DB using better-sqlite3 (no sqlite3 CLI)
@@ -171,9 +203,11 @@ sock.ev.on('connection.update', async (update) => {
   if (fs.existsSync(dbPath)) {
     try {
       const db = new Database(dbPath, { readonly: true });
-      const row = db.prepare(
-        "SELECT COUNT(*) as count FROM chats WHERE jid LIKE '%@g.us' AND jid <> '__group_sync__'",
-      ).get() as { count: number };
+      const row = db
+        .prepare(
+          "SELECT COUNT(*) as count FROM chats WHERE jid LIKE '%@g.us' AND jid <> '__group_sync__'",
+        )
+        .get() as { count: number };
       groupsInDb = row.count;
       db.close();
     } catch {
