@@ -46,7 +46,22 @@ function buildSlackBridge(creds: SlackInstanceEnv, channelType: string, namespac
     adapter: slackAdapter,
     channelType,
     concurrency: 'concurrent',
-    supportsThreads: true,
+    // Flatten threads to channel-root replies — matches the same fix
+    // applied to Discord earlier today (src/channels/discord.ts comment).
+    // Slack's chat-sdk encodes every inbound's threadId as
+    // `slack:CHANNEL:msgts`, even for top-level channel posts (msgts ==
+    // thread_ts only when the message anchors a thread, but the SDK
+    // forwards it either way). With supportsThreads=true the host
+    // preserves the threadId and adapter.postMessage(thread_ts=msgts)
+    // makes Slack create/append-to a thread off the user's message —
+    // turning every reply into a buried thread. 1.x's hand-rolled Slack
+    // posted to channel root via chat.postMessage(channel) without
+    // thread_ts. supportsThreads=false here makes routeInbound strip
+    // threadId at entry, so the outbound deliver lands at channel root.
+    // The `Keep Slack messages brief; use threading for longer content`
+    // guidance in personas still applies — the AGENT can opt INTO
+    // threads with explicit content if it wants.
+    supportsThreads: false,
     // Outgoing: rewrite @DisplayName → <@UXXXX> via the curated identity
     // index. 1.x parity for the Sean-Bonner-style multi-alias resolution
     // (commits ef171d6 + a3128a7). Without this the LLM's @PersonName
