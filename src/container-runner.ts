@@ -459,6 +459,30 @@ async function buildContainerArgs(
   args.push('--security-opt', `seccomp=${assertSeccompProfileExists()}`);
   args.push('--cap-drop', 'ALL');
 
+  // Rootfs lockdown. With the seccomp + cap-drop layers above, a process
+  // inside the container can't escalate; --read-only ensures it can't
+  // tamper with anything in the image either, and the tmpfs mounts give
+  // back the two writable locations actually needed at runtime:
+  //
+  //   /tmp        — entrypoint.sh writes /tmp/input.json before exec'ing
+  //                 bun; tools also use /tmp for general scratch
+  //   /home/node  — Bun/npm/Playwright/agent-browser caches and configs
+  //                 (~/.bun, ~/.npm, ~/.cache, ~/.config). 1.x scoped this
+  //                 to /home/node/.npm under Node; 2.0 runs Bun with more
+  //                 cache paths, so a tmpfs over the whole writable home
+  //                 keeps the model simple. Sizes match 1.x for /tmp;
+  //                 /home/node is bumped to 256m for Playwright/chromium
+  //                 profile churn.
+  //
+  // /workspace and /workspace/agent come in as RW bind mounts from the
+  // host (see buildMounts), so the runner's session-DB writes are
+  // unaffected by --read-only. nosuid on both tmpfs mounts is a
+  // belt-and-braces alongside no-new-privileges + setuid-strip; noexec on
+  // /tmp prevents an attacker from staging a binary there and exec'ing.
+  args.push('--read-only');
+  args.push('--tmpfs', '/tmp:rw,noexec,nosuid,size=256m');
+  args.push('--tmpfs', '/home/node:rw,nosuid,size=256m');
+
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
