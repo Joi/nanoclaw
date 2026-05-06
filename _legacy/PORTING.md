@@ -12,8 +12,8 @@ module-based architecture.
 | Tier 1 #2 — bare-URL auto-intake | **Done** (commit `cc152b5`). |
 | Tier 2 — channel customizations | Not started. Each channel needs `/add-<name>` skill install first. |
 | Tier 3 — email pipeline | Not started; treat as separate project. |
-| Tier 4 — container hardening | **Done partial** (commit `3a302ce`). seccomp + cap-drop + setuid-strip + no-new-privileges. `--read-only` + tmpfs deferred (need smoke test on jibotmac). |
-| Tier 5 — orchestrator survivors | **Audited** (commit pending). 6 files obsolete in 2.0; 5 deferred to user follow-up. See "Tier 5 audit" section below. |
+| Tier 4 — container hardening | **Done** (commits `3a302ce` + `4a95ba0`). seccomp + cap-drop + setuid-strip + no-new-privileges + `--read-only` + tmpfs. Smoke-test path documented below. |
+| Tier 5 — orchestrator survivors | **Audited** (commit `1f8e962`). 6 files obsolete in 2.0; 5 deferred to user follow-up. See "Tier 5 audit" section below. |
 | Tier 6 — script-level features | No port needed; verify on cutover. |
 
 **Production cutover blockers cleared:** Tier 1 (custom provider + intake) and Tier 4 (security posture) are landed. Run `scripts/test-af-alg-block.sh` and `bun test` against `container/agent-runner/` before flipping production.
