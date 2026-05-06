@@ -7,6 +7,7 @@ import { createDiscordAdapter } from '@chat-adapter/discord';
 import { readEnvFile } from '../env.js';
 import { createChatSdkBridge, type ReplyContext } from './chat-sdk-bridge.js';
 import { registerChannelAdapter } from './channel-registry.js';
+import { compactDiscordMentions, recordDiscordIdentity } from './discord-mentions.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
@@ -42,6 +43,28 @@ registerChannelAdapter('discord', {
     // revisit if @chat-adapter/discord adds one.
     (discordAdapter as unknown as { createDiscordThread: () => Promise<unknown> }).createDiscordThread =
       async () => ({});
+
+    // Disable chat-sdk's blind @mention rewriter. DiscordFormatConverter
+    // (index.js:250 in convertMentionsToDiscord, index.js:296 in
+    // nodeToDiscordMarkdown text-node case) wraps every `@(\w+)` to
+    // `<@$1>` — but Discord's mention syntax requires the numeric user
+    // snowflake, not a name. The result is `<@RYU>` rendering as plain
+    // text, not a real ping. We do real name → userId resolution in
+    // compactDiscordMentions (transformOutboundText, below) so this
+    // blind wrap can only get in the way: at best it's a no-op, at
+    // worst it double-wraps our `<@123456>` into `<<@123456>>`. Patch
+    // both the string-mode and AST-text-node paths to identity.
+    const fc = (discordAdapter as unknown as { formatConverter: Record<string, unknown> }).formatConverter;
+    fc.convertMentionsToDiscord = (text: string) => text;
+    const origNodeToMd = (fc.nodeToDiscordMarkdown as (n: unknown) => string).bind(fc);
+    fc.nodeToDiscordMarkdown = function (node: unknown) {
+      // mdast text node: pass value through unchanged. Other node types
+      // delegate to the SDK's original handler so bold/italic/code etc.
+      // render the same as before.
+      const n = node as { type?: string; value?: string };
+      if (n?.type === 'text') return n.value ?? '';
+      return origNodeToMd(node);
+    };
     return createChatSdkBridge({
       adapter: discordAdapter,
       concurrency: 'concurrent',
@@ -57,6 +80,12 @@ registerChannelAdapter('discord', {
       // threadId at entry, so all Discord traffic routes by channel only
       // and the outbound deliver lands at channel root.
       supportsThreads: false,
+      // Outbound: rewrite `@DisplayName` → `<@SNOWFLAKE>` using a per-process
+      // cache of names seen on inbound. 1.x parity for real mention
+      // pings (vs. chat-sdk's literal `<@DisplayName>` which renders as
+      // unclickable text). The cache populates via recordInboundAuthor.
+      transformOutboundText: compactDiscordMentions,
+      recordInboundAuthor: recordDiscordIdentity,
     });
   },
 });

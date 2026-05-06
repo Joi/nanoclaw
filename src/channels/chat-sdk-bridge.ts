@@ -84,6 +84,15 @@ export interface ChatSdkBridgeConfig {
    * Logs still report `adapter: adapter.name` for SDK-internal context.
    */
   channelType?: string;
+  /**
+   * Optional hook fired once per inbound message with the message's
+   * author identity. Used by Discord (see discord-mentions.ts) to build
+   * a name → userId cache so outbound `@DisplayName` can be rewritten
+   * to the real `<@SNOWFLAKE>` Discord mention syntax. Safe to omit on
+   * channels that don't need outbound name resolution (Slack uses a
+   * separate static identity-index path).
+   */
+  recordInboundAuthor?: (userId: string | undefined, fullName?: string, userName?: string) => void;
 }
 
 /**
@@ -187,6 +196,9 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       serialized.senderId = author.userId;
       serialized.sender = name;
       serialized.senderName = name;
+      // Channel-specific name → userId cache (Discord uses this for
+      // outbound @mention compaction). Hook is optional and idempotent.
+      config.recordInboundAuthor?.(author.userId, author.fullName, author.userName);
     }
 
     // Drop raw to save DB space (can be very large)
