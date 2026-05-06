@@ -671,6 +671,12 @@ export function createSignalAdapter(config: {
         ...(dataMessage.quote ? quoteToContent(dataMessage.quote) : {}),
       },
       timestamp,
+      // DMs are by definition addressed to the bot — the router uses this to
+      // decide whether to auto-create a messaging_group + emit the channel-
+      // registration card. Without this, signal DMs to a fresh install drop
+      // silently.
+      isMention: !isGroup,
+      isGroup,
     };
     await setup.onInbound(platformId, null, msg);
 

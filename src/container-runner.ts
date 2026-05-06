@@ -435,6 +435,13 @@ async function buildContainerArgs(
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
 
+  // Colima default bridge can't reach external services on jibotmac (path
+  // MTU mismatch — user-defined bridges work, the default `bridge` network
+  // doesn't, even at the same MTU). Pin to the pre-created `nanoclaw`
+  // network. Created by setup; if missing the daemon will fail to spawn
+  // containers, which is louder than a silent connect-timeout.
+  args.push('--network', 'nanoclaw');
+
   // ── Security hardening (defense-in-depth for CVE-2026-31431 + LPE class) ──
   //
   // Three independent layers that don't depend on each other:

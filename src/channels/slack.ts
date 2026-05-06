@@ -11,11 +11,15 @@ import { compactSlackMentions } from './slack-mentions.js';
 
 registerChannelAdapter('slack', {
   factory: () => {
-    const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET']);
+    const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN']);
     if (!env.SLACK_BOT_TOKEN) return null;
+    // Socket mode (outbound WS) avoids needing a public webhook URL — matches
+    // 1.x prod on jibotmac. Set SLACK_APP_TOKEN to enable; otherwise fall
+    // back to webhook mode.
     const slackAdapter = createSlackAdapter({
       botToken: env.SLACK_BOT_TOKEN,
       signingSecret: env.SLACK_SIGNING_SECRET,
+      ...(env.SLACK_APP_TOKEN ? { mode: 'socket' as const, appToken: env.SLACK_APP_TOKEN } : {}),
     });
     const bridge = createChatSdkBridge({
       adapter: slackAdapter,
