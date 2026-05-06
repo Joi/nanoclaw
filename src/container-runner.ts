@@ -494,6 +494,19 @@ async function buildContainerArgs(
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Host-secret passthrough — env vars set on the daemon process that
+  // agents need at runtime (e.g. JIBOT_INTERNAL_SECRET for the
+  // jibot.md quest handshake API). Only forwarded if actually present
+  // on the host so a missing var doesn't get stamped as an empty string
+  // inside the container. Add to this list when a new host secret
+  // genuinely needs to reach every agent group; per-group secrets
+  // belong in container.json.mcpServers env or a provider contribution.
+  const HOST_SECRET_PASSTHROUGH = ['JIBOT_INTERNAL_SECRET'] as const;
+  for (const key of HOST_SECRET_PASSTHROUGH) {
+    const value = process.env[key];
+    if (value) args.push('-e', `${key}=${value}`);
+  }
+
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {
     for (const [key, value] of Object.entries(providerContribution.env)) {
