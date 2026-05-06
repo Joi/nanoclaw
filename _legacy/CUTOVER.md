@@ -348,3 +348,105 @@ schedule discrete projects:
   inputs / channel during cutover; revive when ready.
 - **Voice bridge / agent-api**, **self-registration**, **people-context**,
   **reminders**, **remote-control** — Tier 5 deferred niches.
+
+## Post-cutover state on jibotmac (verified live 2026-05-06)
+
+These are the operational settings that aren't in git but matter for
+replaying the cutover on a fresh host. Verified against the running
+system on the day of cutover.
+
+### Colima docker daemon
+
+`/etc/docker/daemon.json` inside the lima VM:
+
+```json
+{
+  "exec-opts": ["native.cgroupdriver=cgroupfs"],
+  "features": { "buildkit": true, "containerd-snapshotter": true },
+  "mtu": 1100
+}
+```
+
+The MTU=1100 setting works around a Colima default-bridge path-MTU
+issue on this host where containers on the default `bridge` network
+couldn't reach external services. User-defined networks at the same
+MTU work; the default doesn't.
+
+### Persistent docker network
+
+```bash
+docker network create --opt com.docker.network.driver.mtu=1100 nanoclaw
+```
+
+The container-runner pins every spawn to this network (committed
+`3d31749`). If it's missing, container spawn fails loudly — louder
+than a silent connect-timeout, which is the goal.
+
+Verified: `docker network inspect nanoclaw` reports
+`driver=bridge mtu=1100`.
+
+### com.jibot.nanoclaw launchd plist
+
+ProgramArguments: `/opt/homebrew/bin/node /Users/jibot/nanoclaw-merge/dist/index.js`
+WorkingDirectory: `/Users/jibot/nanoclaw-merge`
+
+EnvironmentVariables:
+
+```
+DOCKER_HOST=unix:///Users/jibot/.colima/default/docker.sock
+HOME=/Users/jibot
+JIBOT_INTERNAL_SECRET=<see .env>
+LOG_LEVEL=debug
+MAX_CONCURRENT_CONTAINERS=10
+PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+TMPDIR=/Users/jibot/nanoclaw-merge/data/tmp
+```
+
+`TMPDIR` overrides the default `/var/folders/...` so transient files
+(image layers under buildkit, container-runner spawn scratch) live on
+the data volume rather than the system tmp.
+
+### com.jibot.signal-cli launchd plist
+
+ProgramArguments:
+
+```
+/opt/homebrew/bin/signal-cli -a +817085315049 daemon \
+  --tcp 127.0.0.1:7583 \
+  --no-receive-stdout \
+  --receive-mode on-start
+```
+
+EnvironmentVariables: `JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home`
+
+`--receive-mode on-start` keeps the JSON-RPC daemon receiving messages
+without needing a separate `subscribe` call from the client; combined
+with `--no-receive-stdout`, the daemon only emits via the TCP API.
+
+The pre-TCP version of the plist is preserved as
+`com.jibot.signal-cli.plist.bak-pre-tcp` (and a generic `.bak`).
+
+### OneCLI account
+
+- Account: app.onecli.sh (joi@ito.com)
+- Credentials in `~/nanoclaw-merge/.env` as `ONECLI_URL` + `ONECLI_API_KEY`
+- Container-runner applies the OneCLI gateway config to every spawn
+  (line `OneCLI gateway applied` in the daemon log) — refuses to spawn
+  if the gateway can't be configured, leaving the inbound message
+  pending so the next sweep tick retries.
+
+### Auxiliary launchd state
+
+After the Section 6 audit, four units are retired (plists in
+`~/Library/LaunchAgents/disabled/`):
+
+- `com.nanoclaw.telegram-relay` (replaced by 2.0's grammY adapter)
+- `com.nanoclaw.qmd-reindex` (replaced by `com.jibot.qmd-fleet` stack)
+- `com.nanoclaw.learned-facts` (1.x sessions only)
+- `com.jibot.nanoclaw-watchdog` (1.x activity model unfit for 2.0;
+  path/pattern fix in `~/scripts/nanoclaw-watchdog.sh` is preserved
+  for any future revival decision)
+
+Kept: `com.nanoclaw.iblai-router`, `com.jibot.reap-signal-zombies`.
+
+See `_legacy/SECTION-6-LAUNCHD-AUDIT.md` for full reasoning.
