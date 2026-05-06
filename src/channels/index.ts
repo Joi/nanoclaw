@@ -10,3 +10,4 @@ import './cli.js';
 import './signal.js';
 import './telegram.js';
 import './whatsapp.js';
+import './slack.js';
