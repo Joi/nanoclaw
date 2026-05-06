@@ -56,6 +56,27 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
        fi \
     && rm -rf /var/lib/apt/lists/*
 
+# Defense-in-depth for CVE-2026-31431 (Linux kernel AF_ALG LPE, disclosed 2026-04-29).
+# The exploit chain is socket(AF_ALG) → write payload → exec `su` to root. The
+# seccomp profile (seccomp/agent-default.json, wired in via container-runner.ts)
+# breaks step 1; this layer breaks step 3 by removing the `su` primitive entirely.
+# Independently effective: even if a future kernel LPE bypasses seccomp, an agent
+# in this image has no `su` to escalate with.
+#
+# Other setuid binaries shipped in node:22-slim that this layer also strips:
+# `passwd`, `chfn`, `chsh`, `gpasswd`, `newgrp` (no legitimate use in agent
+# containers; removing them shrinks the privilege-escalation surface). `mount`
+# and `umount` are deliberately retained — chromium's renderer sandbox sometimes
+# inspects them and removing them surfaces noisy errors without gaining defense
+# (the syscalls are already blocked by seccomp + no-new-privileges + USER node).
+#
+# Fail-fast assertion in the same RUN layer so the build breaks loudly if a
+# future base-image change re-introduces `su` somewhere unexpected.
+RUN rm -f /bin/su /usr/bin/su \
+          /usr/bin/passwd /usr/bin/chfn /usr/bin/chsh \
+          /usr/bin/gpasswd /usr/bin/newgrp \
+    && ! command -v su
+
 # Chromium path for agent-browser / Playwright consumers
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

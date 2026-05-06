@@ -20,7 +20,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
-import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import { CONTAINER_RUNTIME_BIN, assertSeccompProfileExists, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
@@ -434,6 +434,30 @@ async function buildContainerArgs(
   agentIdentifier?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
+
+  // ── Security hardening (defense-in-depth for CVE-2026-31431 + LPE class) ──
+  //
+  // Three independent layers that don't depend on each other:
+  //
+  //   1. seccomp profile blocks `socket(AF_ALG)` and `socket(AF_VSOCK)`
+  //      (the entry primitive for CVE-2026-31431). Default Docker profile
+  //      does NOT block these — supplying our own is the whole point.
+  //   2. no-new-privileges denies setuid/setgid bit elevation; combined
+  //      with the setuid-strip RUN block in container/Dockerfile, this
+  //      kills the `socket(AF_ALG) → write payload → exec su` chain
+  //      even if a future kernel patch bypasses seccomp.
+  //   3. cap-drop ALL: a root process inside the container with no Linux
+  //      capabilities cannot CHOWN, bind privileged ports, load kernel
+  //      modules, or override DAC. Empirically verified in 1.x: shell,
+  //      python, node/bun, git, and file ops with proper host-UID
+  //      mapping all work under cap-drop=ALL with this seccomp profile.
+  //
+  // Originally added in jibot-code-ilg / jibot-code-x7w (commits 8c02b82,
+  // aa63434, d4c952e in pre-2.0-merge history). See _legacy/PORTING.md
+  // Tier 4 for the full rationale + verification matrix.
+  args.push('--security-opt', 'no-new-privileges');
+  args.push('--security-opt', `seccomp=${assertSeccompProfileExists()}`);
+  args.push('--cap-drop', 'ALL');
 
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).

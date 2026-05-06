@@ -271,19 +271,21 @@ describe('urlIntakeFilter', () => {
       statusCode: 200,
       body: JSON.stringify({ title: 'A title', classification: 'note', file_path: 'a.md' }),
     };
-    const deliver = vi.fn(async () => 'msg-1');
+    const deliver = vi.fn<
+      (channelType: string, platformId: string, threadId: string | null, kind: string, content: string) => Promise<string>
+    >().mockResolvedValue('msg-1');
     (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
 
     const consumed = await urlIntakeFilter(evt('https://x.com/abc'));
     expect(consumed).toBe(true);
     expect(captured?.opts.path).toBe('/intake');
     expect(deliver).toHaveBeenCalledTimes(1);
-    const [channelType, platformId, threadId, kind, content] = deliver.mock.calls[0]!;
-    expect(channelType).toBe('sig');
-    expect(platformId).toBe('+12025550100');
-    expect(threadId).toBeNull();
-    expect(kind).toBe('chat');
-    expect(JSON.parse(content as string)).toEqual({
+    const call = deliver.mock.calls[0]!;
+    expect(call[0]).toBe('sig');
+    expect(call[1]).toBe('+12025550100');
+    expect(call[2]).toBeNull();
+    expect(call[3]).toBe('chat');
+    expect(JSON.parse(call[4])).toEqual({
       text: 'Filed [note]: A title\n→ a.md',
     });
   });
@@ -301,11 +303,13 @@ describe('urlIntakeFilter', () => {
   it('still consumes when sprite errors — replies with error message', async () => {
     process.env.INTAKE_ENABLED_PLATFORM_IDS = 'sig:+12025550100';
     mockResponse = { statusCode: 500, body: 'broken' };
-    const deliver = vi.fn(async () => 'msg-1');
+    const deliver = vi.fn<
+      (channelType: string, platformId: string, threadId: string | null, kind: string, content: string) => Promise<string>
+    >().mockResolvedValue('msg-1');
     (getDeliveryAdapter as ReturnType<typeof vi.fn>).mockReturnValue({ deliver });
     expect(await urlIntakeFilter(evt('https://x.com'))).toBe(true);
     expect(deliver).toHaveBeenCalledTimes(1);
-    const content = deliver.mock.calls[0]![4] as string;
-    expect(JSON.parse(content).text).toMatch(/Couldn't auto-file/);
+    const call = deliver.mock.calls[0]!;
+    expect(JSON.parse(call[4]).text).toMatch(/Couldn't auto-file/);
   });
 });

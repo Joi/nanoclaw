@@ -23,6 +23,8 @@ import {
   stopContainer,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
+  seccompProfilePath,
+  assertSeccompProfileExists,
 } from './container-runtime.js';
 import { CONTAINER_INSTALL_LABEL } from './config.js';
 import { log } from './log.js';
@@ -37,6 +39,24 @@ describe('readonlyMountArgs', () => {
   it('returns -v flag with :ro suffix', () => {
     const args = readonlyMountArgs('/host/path', '/container/path');
     expect(args).toEqual(['-v', '/host/path:/container/path:ro']);
+  });
+});
+
+describe('seccompProfilePath', () => {
+  it('resolves to <cwd>/seccomp/agent-default.json', () => {
+    const p = seccompProfilePath();
+    expect(p).toMatch(/seccomp\/agent-default\.json$/);
+    expect(p.startsWith('/')).toBe(true);
+  });
+});
+
+describe('assertSeccompProfileExists', () => {
+  it('returns the path when the profile is present (real repo state)', () => {
+    // The profile lives in the repo root; tests run from the repo root,
+    // so the real check should pass.
+    const p = assertSeccompProfileExists();
+    expect(p).toBe(seccompProfilePath());
+    expect(log.debug).toHaveBeenCalled();
   });
 });
 
