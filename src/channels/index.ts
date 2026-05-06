@@ -12,3 +12,4 @@ import './telegram.js';
 import './whatsapp.js';
 import './slack.js';
 import './discord.js';
+import './line.js';
