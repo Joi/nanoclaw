@@ -123,6 +123,27 @@ export function setMessageInterceptor(fn: MessageInterceptorFn): void {
 }
 
 /**
+ * Inbound content filter. Runs after the messageInterceptor but before
+ * messaging-group resolution. Lets a module classify the message content
+ * (e.g. "is this a bare URL?") and consume it without engaging the agent.
+ *
+ * Returning true → message is consumed and routing stops. Returning false →
+ * routing continues normally. Single-registrant; modules that want to
+ * consume content register here so they don't fight messageInterceptor's
+ * approval-reply ownership.
+ */
+export type InboundContentFilterFn = (event: InboundEvent) => Promise<boolean>;
+
+let inboundContentFilter: InboundContentFilterFn | null = null;
+
+export function setInboundContentFilter(fn: InboundContentFilterFn): void {
+  if (inboundContentFilter) {
+    log.warn('Inbound content filter overwritten');
+  }
+  inboundContentFilter = fn;
+}
+
+/**
  * Channel-registration hook. Runs when the router sees a mention/DM on a
  * messaging group that has no wirings AND hasn't been denied. The hook is
  * expected to escalate to an owner (card, etc.) and arrange for future
@@ -159,6 +180,10 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   // Pre-route interceptor — lets modules consume messages before any routing
   // (e.g. free-text replies during multi-step approval flows).
   if (messageInterceptor && (await messageInterceptor(event))) return;
+
+  // Pre-route content filter — content-classification modules (e.g. bare-URL
+  // intake) consume the message here before any messaging-group lookup.
+  if (inboundContentFilter && (await inboundContentFilter(event))) return;
 
   // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,
   //    WhatsApp, iMessage, email) collapse threads to the channel.
