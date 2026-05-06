@@ -4,6 +4,20 @@ Generated 2026-05-06 during Phase 3 of the upstream-merge work. Captures
 everything needed to re-port the fork's custom features onto 2.0's
 module-based architecture.
 
+## Status — 2026-05-06
+
+| Tier | State |
+|---|---|
+| Tier 1 #1 — amplifier-remote provider | **Done** (commit `57947b0`). Bun-side tests need `bun test` on a host with bun. |
+| Tier 1 #2 — bare-URL auto-intake | **Done** (commit `cc152b5`). |
+| Tier 2 — channel customizations | Not started. Each channel needs `/add-<name>` skill install first. |
+| Tier 3 — email pipeline | Not started; treat as separate project. |
+| Tier 4 — container hardening | **Done partial** (commit `3a302ce`). seccomp + cap-drop + setuid-strip + no-new-privileges. `--read-only` + tmpfs deferred (need smoke test on jibotmac). |
+| Tier 5 — orchestrator survivors | **Audited** (commit pending). 6 files obsolete in 2.0; 5 deferred to user follow-up. See "Tier 5 audit" section below. |
+| Tier 6 — script-level features | No port needed; verify on cutover. |
+
+**Production cutover blockers cleared:** Tier 1 (custom provider + intake) and Tier 4 (security posture) are landed. Run `scripts/test-af-alg-block.sh` and `bun test` against `container/agent-runner/` before flipping production.
+
 ## What just happened
 
 Upstream `qwibitai/nanoclaw` shipped a major rewrite between our last sync
@@ -106,14 +120,39 @@ Must be re-applied to `container/Dockerfile` and `container/entrypoint.sh` (both
 - **Legacy:** `_legacy/v1.2.49/container/` and the `scripts/test-af-alg-block.sh` script (still in `scripts/`, not deleted)
 - **2.0 target:** `container/Dockerfile`, `container/entrypoint.sh`, possibly `src/modules/mount-security/` (which 2.0 already has — review first)
 
-### Tier 5 — orchestrator-level customizations
+### Tier 5 — orchestrator-level customizations (audited)
 
-- **GIDC commands** (`gidc-commands.ts`, intake routing): no obvious 2.0 equivalent. Probably `src/modules/gidc/`.
-- **sender-allowlist** (`sender-allowlist.ts`): 2.0 has `src/modules/permissions/` with channel-approval and sender-approval tables. Likely already covers this — review before porting.
-- **agent-api** (port 3200, `agent-api.ts`): 2.0 has `src/webhook-server.ts`. Different model — agent-api might be obsolete or fold into webhook-server.
-- **self-registration name validation** (`b9fdf5a`): port the regex into wherever 2.0 handles user-name capture.
-- **Listening modes** (`listening-modes.ts`, commit `32a1e05`): 2.0 has `src/db/migrations/010-engage-modes.ts` — review first; may already be covered.
-- **People context, observations, moderation, reminders, remote-control, user-snapshot, workstream-routing**: all deleted in 2.0. Each needs an evaluate-then-port-or-drop call. Many may be obsolete given the new module model.
+Audit completed 2026-05-06. Most of these turn out to be obsolete in 2.0
+because the architectural shifts (role-based access, session DBs replacing
+IPC, engage-modes replacing listening-modes, deleted GIDC/email surfaces)
+already cover the same ground or eliminate the need.
+
+**Obsolete in 2.0 — no port needed (legacy preserved in `_legacy/v1.2.49/src/`):**
+
+| Legacy file | Replaced by / why obsolete |
+|---|---|
+| `gidc-commands.ts` (18 lines) | Slash-command parser tied to the legacy GIDC intake pipeline (deleted). 2.0's `src/command-gate.ts` handles slash commands generically. |
+| `sender-allowlist.ts` (42 lines) | Already a deprecation shim in 1.x — pointed at the deleted `user-identity.ts`. 2.0's `src/modules/permissions/sender-approval.ts` + `pending_sender_approvals` migration (011) covers the surface. |
+| `listening-modes.ts` (78 lines) | 2.0 migration `010-engage-modes.ts` replaces the active/attentive/silent enum with the orthogonal `engage_mode` / `engage_pattern` / `sender_scope` / `ignored_message_policy` columns on `messaging_group_agents`. The data model is already migrated; the legacy parser is unused. |
+| `moderation.ts` (98 lines) | Tier-based block/ban (owner/admin/staff/guest/blocked/banned). 2.0's `src/modules/permissions/access.ts` is role-based (owner/admin/member) with default-deny — a generalization of the legacy tier model. The "blocked" / "banned" states fold into "not_member". |
+| `user-snapshot.ts` (101 lines) | Wrote a JSON snapshot of GIDC users into the IPC directory so containers could read it without an IPC round-trip. 2.0's session-DB architecture eliminates IPC; users are read directly from the DB by anything that needs them. |
+| `observations.ts` (104 lines) | IPC-driven observation queue tied to GIDC. Both surfaces are gone in 2.0; reintroducing this would need a fresh design on the session-DB model. |
+
+**Deferred — user-specific niches, not blocking cutover:**
+
+| Legacy file | Why deferred |
+|---|---|
+| `agent-api.ts` (289 lines) | iOS voice bridge HTTP endpoint (port 3200). Specific to the user's iOS Shortcut → NanoClaw integration. 2.0 has `src/webhook-server.ts` (Chat-SDK adapter webhook routing) — a distinct purpose; the voice bridge needs either a separate route on that server or its own server. Significant rework, not a "simple port." |
+| `self-registration.ts` (184 lines) | "I'm Joi" → claim YAML detection, identity-index lookup, anchored-regex name validation (commit `b9fdf5a`). Niche flow tied to switchboard identity files. Does not fit 2.0's role-based permissions cleanly; a new home would need design. |
+| `people-context.ts` (272 lines) | Pre-dispatch QMD lookup that injects `<people-context>` into the prompt. Useful for the user's context-enrichment workflow, but 272 lines of QMD-specific behavior; would land naturally as a `src/modules/people-context/` after the QMD integration model is decided in 2.0. |
+| `reminders.ts` (98 lines) | Apple Reminders Python bridge wrapper. The bridge script `scripts/reminders-bridge.py` survived the merge unchanged; the wrapper can be re-introduced as part of a custom skill or a small module when the user wires it back in. |
+| `remote-control.ts` (224 lines) | claude.ai/code URL relay. Niche; user can defer or drop. |
+
+**Workstream routing** (`workstream-routing.ts`, 58 lines) is included in the email pipeline and tracked under Tier 3. Not duplicated here.
+
+### Tier 5 not addressed elsewhere
+
+- **Orchestrator-level survivors that DO need porting eventually:** none in the deferred list block production cutover. The user can port any of them by request, individually. Their 1.x source is intact in `_legacy/v1.2.49/src/` and reachable via the `pre-2.0-merge` tag.
 
 ### Tier 6 — script-level features (mostly preserved as scripts)
 
@@ -142,17 +181,27 @@ git diff 226b520..pre-2.0-merge -- src/runners/
 
 ## Recommended porting sequence
 
-1. **amplifier-remote** (Tier 1 #1+3) — most recent, most valuable, smallest surface. Get `src/providers/amplifier-remote.ts` working with tests passing. Establishes the porting pattern.
-2. **bare-URL intake** (Tier 1 #2) — exercises the new module shape.
-3. **container hardening** (Tier 4) — small focused diffs against 2.0's Dockerfile.
-4. **install needed channels via `/add-<name>`** then port channel-internal fixes (Tier 2).
-5. **email pipeline** (Tier 3) — large project, schedule separately.
-6. **orchestrator-level survivors** (Tier 5) — evaluate each against 2.0 first.
+1. ~~**amplifier-remote** (Tier 1 #1+3)~~ — **Done** (commit `57947b0`).
+2. ~~**bare-URL intake** (Tier 1 #2)~~ — **Done** (commit `cc152b5`).
+3. ~~**container hardening** (Tier 4)~~ — **Done partial** (commit `3a302ce`); `--read-only` + tmpfs follow-up after smoke test.
+4. ~~**Tier 5 audit**~~ — **Done**: 6 obsolete, 5 deferred. See "Tier 5" section above.
+5. **install needed channels via `/add-<name>`** then port channel-internal fixes (Tier 2). Interactive — start when the user is ready to drive each channel install.
+6. **email pipeline** (Tier 3) — large project, schedule separately.
 
 ## Production cutover
 
 Production NanoClaw still runs from `~/nanoclaw` (on `main`, untouched).
 This worktree is `~/nanoclaw-merge` on `chore/upstream-merge-2026-05`.
-Cutover should not happen until **at minimum Tiers 1 and 4 are ported** —
-without amplifier-remote, the existing automation breaks; without container
-hardening, you regress security posture.
+
+**Cutover blockers — current status:**
+
+| Blocker | State |
+|---|---|
+| Tier 1 #1 (amplifier-remote) — without it the existing automation breaks | Done (`57947b0`). Validate with `cd container/agent-runner && bun test` before cutover. |
+| Tier 1 #2 (URL auto-intake) — daily quality-of-life | Done (`cc152b5`). Set `INTAKE_ENABLED_PLATFORM_IDS` in env to activate post-cutover. |
+| Tier 4 (security posture) — refusing to regress on CVE-2026-31431 | Done partial (`3a302ce`). Run `scripts/test-af-alg-block.sh` on jibotmac after the image rebuild. |
+| Channel installs (Tier 2) | Pending. Each channel needs `/add-<name>` skill install + porting of its specific 1.x customizations. |
+
+Cutover is technically unblocked once channels are installed; the deferred
+Tier 5 niches (voice bridge, self-registration, people-context, reminders,
+remote-control) are not on the critical path.
