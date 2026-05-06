@@ -8,8 +8,13 @@ Commands:
     list                             - List all known recipients
     init                             - Auto-discover recipients from DB/groups
 
-Uses ~/nanoclaw/data/recipients.json as the recipient registry.
-Routes messages to the correct IPC group directory based on recipient config.
+Uses <nanoclaw-merge>/data/recipients.json as the recipient registry —
+ported from 1.x (~/nanoclaw/data/recipients.json) on 2026-05-06 so the
+476 hand-curated alias entries survive the eventual removal of the 1.x
+checkout. The remaining 1.x paths (IPC_BASE, DB_PATH, GROUPS_DIR) are
+left pointing at ~/nanoclaw because the IPC + DB shapes changed in 2.0;
+those code paths need a separate port before this script does anything
+beyond `resolve` / `list`.
 """
 
 import json
@@ -26,7 +31,8 @@ from pathlib import Path
 # Paths
 HOME = Path.home()
 NANOCLAW = HOME / "nanoclaw"
-REGISTRY_PATH = NANOCLAW / "data" / "recipients.json"
+NANOCLAW_MERGE = HOME / "nanoclaw-merge"
+REGISTRY_PATH = NANOCLAW_MERGE / "data" / "recipients.json"
 IPC_BASE = NANOCLAW / "data" / "ipc"
 DEFAULT_IPC_GROUP = "joi-dm"
 DB_PATH = NANOCLAW / "store" / "messages.db"
