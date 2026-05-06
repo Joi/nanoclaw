@@ -24,6 +24,7 @@ import { registerWebhookAdapter } from '../webhook-server.js';
 import { getAskQuestionRender } from '../db/sessions.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
+import { createBackfiller } from './chat-sdk-backfill.js';
 
 /** Adapter with optional gateway support (e.g., Discord). */
 interface GatewayAdapter extends Adapter {
@@ -227,11 +228,30 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // flag that routeInbound evaluates; the router calls back into
       // bridge.subscribe(...) when a mention-sticky wiring engages.
 
+      // Backfiller — on the FIRST activity in any thread per process, fetch
+      // messages newer than the bot's last own reply via the SDK's
+      // fetchMessages and inject them as inbound events oldest-first BEFORE
+      // the live message dispatches. This catches the backlog that
+      // accumulated while the daemon was down (cutover gap of ~17h on
+      // 2026-05-06; ongoing risk for active channels like Henkaku Quest
+      // where users keep posting whether or not the bot is online). The
+      // backfiller's per-process Set means each thread is fetched at most
+      // once per daemon run — the bot's most recent own message is the
+      // natural cutoff so subsequent restarts don't re-replay anything the
+      // bot already saw.
+      const backfiller = createBackfiller({
+        adapter,
+        channelType,
+        setupConfig,
+        messageToInbound,
+      });
+
       // Subscribed threads — every message in a thread we've previously
       // engaged. Carry the SDK's `message.isMention` through so mention-mode
       // wirings still fire on in-thread mentions.
       chat.onSubscribedMessage(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
+        await backfiller.onThreadActivity(thread.id, channelId, true, message.id);
         await setupConfig.onInbound(
           channelId,
           thread.id,
@@ -242,6 +262,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // @mention in an unsubscribed thread — SDK-confirmed bot mention.
       chat.onNewMention(async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
+        await backfiller.onThreadActivity(thread.id, channelId, true, message.id);
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, true));
       });
 
@@ -260,6 +281,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           sender: (message.author as any)?.fullName ?? (message.author as any)?.userId ?? 'unknown',
           threadId: thread.id,
         });
+        await backfiller.onThreadActivity(thread.id, channelId, false, message.id);
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, false));
       });
 
@@ -275,6 +297,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // flood gate.
       chat.onNewMessage(/[\s\S]*/, async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
+        await backfiller.onThreadActivity(thread.id, channelId, true, message.id);
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
       });
 
