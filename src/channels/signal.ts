@@ -17,6 +17,7 @@ import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } fr
 import { registerChannelAdapter } from './channel-registry.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
+import { ASSISTANT_NAME } from '../config.js';
 
 // ---------------------------------------------------------------------------
 // Signal CLI daemon management
@@ -334,7 +335,49 @@ interface SignalEnvelope {
  * agent sees `@Alice` instead of a raw UUID. Signal's protocol uses a single
  * placeholder character (typically U+FFFC) at each mention's `start` offset.
  */
-function resolveMentions(text: string, mentions?: SignalMention[]): string {
+/**
+ * Cheap text-match for the bot's assistant name in resolved message text.
+ * Used by the group-message path to set isMention when signal-cli doesn't
+ * give us a structured "bot was mentioned" signal. Word-boundary on both
+ * ends so substrings of unrelated words don't trigger; case-insensitive.
+ */
+const BOT_NAME_RE = new RegExp(`(?:^|\\W)@?${ASSISTANT_NAME.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}(?:$|\\W)`, 'i');
+function mentionsBotByName(text: string): boolean {
+  return text.length > 0 && BOT_NAME_RE.test(text);
+}
+
+/**
+ * Read the bot's own ACI/UUID from signal-cli's accounts.json on disk.
+ * Cached after first read; falls back to undefined if the file isn't
+ * readable (defensive — should never happen on a properly authenticated
+ * install). Used to detect native @-mentions: when signal-cli's
+ * dataMessage.mentions[] has an entry with `uuid === botUuid`, that's a
+ * platform-confirmed bot mention regardless of the surrounding text.
+ */
+function loadBotUuid(signalDataDir: string, account: string): string | undefined {
+  // signal-cli's accounts.json lives one level down inside `data/`, not at
+  // the data-dir root. Path verified live on jibotmac 2026-05-06:
+  //   /Users/jibot/.local/share/signal-cli/data/accounts.json
+  const accountsPath = join(signalDataDir, 'data', 'accounts.json');
+  try {
+    const raw = readFileSync(accountsPath, 'utf-8');
+    const parsed = JSON.parse(raw) as { accounts?: Array<{ number?: string; uuid?: string }> };
+    const entry = parsed.accounts?.find((a) => a.number === account);
+    return entry?.uuid;
+  } catch (err) {
+    log.warn('Signal: could not read accounts.json — native @-mention detection disabled', {
+      accountsPath, account, err: (err as Error).message,
+    });
+    return undefined;
+  }
+}
+
+function mentionsBotByUuid(botUuid: string | undefined, mentions?: SignalMention[]): boolean {
+  if (!botUuid || !mentions || mentions.length === 0) return false;
+  return mentions.some((m) => m.uuid === botUuid);
+}
+
+function resolveMentions(text: string, mentions?: SignalMention[], botUuid?: string): string {
   if (!mentions || mentions.length === 0) return text;
   const sorted = [...mentions].sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
   let result = '';
@@ -342,7 +385,16 @@ function resolveMentions(text: string, mentions?: SignalMention[]): string {
   for (const m of sorted) {
     const start = m.start ?? 0;
     const length = m.length ?? 1;
-    const name = m.name || m.number || (m.uuid ? m.uuid.slice(0, 8) : 'someone');
+    // Bot self-mention: render as `@jibot` (the assistant's name) rather
+    // than its phone number / display profile, so the agent's persona
+    // logic — which keys on the literal "@jibot" string when deciding
+    // whether it was addressed — actually sees the address. Without this,
+    // a Signal native @-mention picker resolves to "@+817085315049" and
+    // the agent treats it as "user pinged a phone number, not me".
+    const isBotSelfMention = !!botUuid && m.uuid === botUuid;
+    const name = isBotSelfMention
+      ? ASSISTANT_NAME
+      : (m.name || m.number || (m.uuid ? m.uuid.slice(0, 8) : 'someone'));
     if (start < cursor) continue;
     result += text.slice(cursor, start) + `@${name}`;
     cursor = start + length;
@@ -531,6 +583,10 @@ export function createSignalAdapter(config: {
   let connected = false;
   const echoCache = new EchoCache();
   let setup: ChannelSetup | null = null;
+  const botUuid = loadBotUuid(config.signalDataDir, config.account);
+  if (botUuid) {
+    log.info('Signal: native @-mention detection enabled', { botUuid: botUuid.slice(0, 8) + '…' });
+  }
 
   // -- inbound handling --
 
@@ -586,7 +642,7 @@ export function createSignalAdapter(config: {
     if (!dataMessage) return;
 
     const rawText = (dataMessage.message ?? '').trim();
-    const text = rawText ? resolveMentions(rawText, dataMessage.mentions) : '';
+    const text = rawText ? resolveMentions(rawText, dataMessage.mentions, botUuid) : '';
 
     const audioAttachment = dataMessage.attachments?.find((a) => a.contentType?.startsWith('audio/') && a.id);
     const imageAttachments = dataMessage.attachments?.filter((a) => a.contentType?.startsWith('image/') && a.id) ?? [];
@@ -675,7 +731,17 @@ export function createSignalAdapter(config: {
       // decide whether to auto-create a messaging_group + emit the channel-
       // registration card. Without this, signal DMs to a fresh install drop
       // silently.
-      isMention: !isGroup,
+      //
+      // For groups, prefer signal-cli's structured mentions[] array
+      // (Signal's native @-mention picker passes the bot's UUID here);
+      // fall back to a text-match against the assistant name so plain
+      // "jibot ..." or "@jibot" still engages, restoring 1.x's
+      // attentive-channel behavior. Case-insensitive, word-boundary so
+      // "jibote" or "jibot.app" don't trigger.
+      isMention:
+        !isGroup ||
+        mentionsBotByUuid(botUuid, dataMessage.mentions) ||
+        mentionsBotByName(text),
       isGroup,
     };
     await setup.onInbound(platformId, null, msg);
