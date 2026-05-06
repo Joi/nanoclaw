@@ -33,6 +33,7 @@ import { ThreadFailureTracker } from '../email-thread-failure-tracker.js';
 import { EmailIdentityResolver, IdentityResult } from '../email-identity-resolver.js';
 import { resolveEmailIntent, IntentResult } from '../email-intent-resolver.js';
 import { checkEmailPolicy } from '../email-policy-adapter.js';
+import { preprocessEmail } from '../email-preprocessor.js';
 import { createEmailReceipt } from '../email-receipt.js';
 import { resolveReceiptDir } from '../workstream-routing.js';
 import { ReminderAdapter } from '../email-reminder-adapter.js';
@@ -422,6 +423,22 @@ export class EmailChannel implements Channel {
         { senderEmail, tier: identity.tier, intent: intentResult.intent, reason: policy.reason },
         'email.policy.denied',
       );
+      await this.markProcessed(thread.id);
+      return;
+    }
+
+    // Pre-processing: handle known patterns before agent dispatch
+    const preResult = await preprocessEmail({
+      parsed,
+      subject,
+      senderEmail,
+      threadId: thread.id,
+      bodyText: parsed.map((m) => m.body).join('\n\n'),
+      rawParts: messages.flatMap((m) => m.payload?.parts ?? []),
+    });
+
+    if (preResult.handled) {
+      logger.info({ threadId: thread.id, reason: preResult.reason }, '[preprocess] handled');
       await this.markProcessed(thread.id);
       return;
     }

@@ -2,6 +2,12 @@
 
 Public channel bot for the joiito Slack workspace #jibot channel.
 
+## Reply Format
+
+**Reply with just the message text.** Do NOT prefix your reply with `Jibot:`, `jibot:`, `ジャイボット:`, or any sender label — the chat platform shows your name automatically. Conversation history is presented to you in `<message sender="Name">…</message>` XML format; do not mimic that format in your output.
+
+返信にはメッセージ本文のみを書く。「Jibot:」「ジャイボット:」など送信者名の接頭辞は付けないこと。チャットアプリが送信者名を自動表示する。
+
 ## Capabilities
 
 - **Knowledge query** — QMD search across public knowledge (jibrain)
@@ -133,6 +139,32 @@ will promote to the atlas.
 
 
 
+
+
+
+
+
+### 2026-05-03
+- Jon Phillips (U09HCAHLSJ0 / `rejon`) corrected: does NOT work in cryptography/crypto as in cryptographer; instead works with open source, "crypto" as in cryptographic/distributed systems, art, and distribution
+- Dustin D'Amour (U6HB2SWQG / `wizcraker`) originally from ~2003 #joiito Freenode era, had extended absence, now rejoined the community
+- Thomas Vander Wal (U030CF0RM / `vanderwal`) — information architect, coined "folksonomy" (2004), originated "Personal InfoCloud" and "Model of Attraction" framework, Principal at InfoCloud Solutions
+- Daniel Schildt (U0308BM5X / `d2s`) — front-end developer, blogs at notes.autiomaa.org on privacy, JavaScript, tech ethics; original #joiito IRC community member
+- Seraph (U03G1P5DZ / `seraph`) — new community member, intake queued for triage
+- Madars Virza (UMRQ077T4 / `madars`) — cryptographer (not Jon), Chief Scientist at Radius Technology Systems (Jan 2025–present), PhD from MIT under Ron Rivest, worked on "Humanizing AI in Law" project with Joi
+- jibot originated 2003 on #joiito Freenode as Victor Ruiz's Python IRC bot; evolved IRC → Slack → Signal → basic scripts → OpenClaw (GPT) → NanoClaw (Claude)
+- jibot's core mission: "communities are stronger when members know about each other"; community members taught it via `?learn` commands in IRC era
+- jibot has no persistent memory of 2003-era #joiito Freenode IRC conversations; all knowledge from that era was lost transitioning from Victor Ruiz's original bot to NanoClaw
+- All six active members now have Slack IDs collected and verified: Jon Phillips (U09HCAHLSJ0), Thomas Vander Wal (U030CF0RM), Daniel Schildt (U0308BM5X), Dustin D'Amour (U6HB2SWQG), Seraph (U03G1P5DZ), Madars Virza (UMRQ077T4)
+
+### 2026-05-02
+- Reaction-based acknowledgements (✅ or 👍) feature request confirmed and queued for Joi's review to reduce channel noise
+- Jon Phillips mischaracterization clarified in conversation: works at intersection of open source, **cryptography/distributed systems** (not cryptographer—Madars Virza is the cryptographer), art, and distribution
+- Seraph (U03G1P5DZ) is a new community member; intake file queued for Joi's triage run for atlas promotion
+- Dustin D'Amour (wizcraker, U6HB2SWQG) rejoined #joiito community after extended absence since ~2003 Freenode era; intake file queued for atlas promotion
+- Thomas Vander Wal (U030CF0RM) and Daniel Schildt (U0308BM5X) intake files queued pending Joi's triage run for atlas promotion
+- jibot has no persistent memory of 2003-era #joiito Freenode IRC conversations; all knowledge from that era was lost transitioning from Victor Ruiz's original Python IRC bot to current NanoClaw system
+- jibrain is jibot's file-based knowledge base; jibot is stateless and reconstructs context from jibrain each session
+- Slack user ID mappings collected for all active members: Jon Phillips (U09HCAHLSJ0), Thomas Vander Wal (U030CF0RM), Daniel Schildt (U0308BM5X), Dustin D'Amour (U6HB2SWQG), Seraph (U03G1P5DZ), Madars Virza (UMRQ077T4)
 
 ### 2026-04-27
 - Jon Phillips (`rejon`, U09HCAHLSJ0) — domain rejon.org; mischaracterization clarified in this conversation: works at intersection of open source, crypto (as in cryptography/distributed systems), art, and distribution — NOT a cryptographer

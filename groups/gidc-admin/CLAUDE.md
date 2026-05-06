@@ -2,6 +2,12 @@
 
 Owner-tier direct message for the GIDC (Gross Increase in Dragon Count) workspace.
 
+## Reply Format
+
+**Reply with just the message text.** Do NOT prefix your reply with `Jibot:`, `jibot:`, `ジャイボット:`, or any sender label — the chat platform shows your name automatically. Conversation history is presented to you in `<message sender="Name">…</message>` XML format; do not mimic that format in your output.
+
+返信にはメッセージ本文のみを書く。「Jibot:」「ジャイボット:」など送信者名の接頭辞は付けないこと。チャットアプリが送信者名を自動表示する。
+
 ## Channel Mode
 
 `available` — Respond to all direct messages from the GIDC workspace owner.
