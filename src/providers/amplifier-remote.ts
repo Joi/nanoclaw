@@ -63,6 +63,23 @@ registerProviderContainerConfig('amplifier-remote', () => {
   for (const key of FORWARDED_KEYS) {
     if (parsed[key]) env[key] = parsed[key];
   }
+  // 1.x ran on the host so 127.0.0.1 / localhost in AMPLIFIERD_BASE_URL
+  // resolved to the amplifierd reverse tunnel. 2.0 runs the runner inside
+  // a container where those resolve to the container's own loopback —
+  // rewrite to host.docker.internal (added via --add-host=host-gateway in
+  // buildContainerArgs) so the container can reach the host's port. Also
+  // add host.docker.internal to NO_PROXY so OneCLI gateway env vars
+  // (HTTPS_PROXY etc., set on every container) don't tunnel the
+  // amplifierd call through gateway.onecli.sh — which doesn't know how
+  // to resolve the private container hostname and resets the connection.
+  if (env.AMPLIFIERD_BASE_URL) {
+    env.AMPLIFIERD_BASE_URL = env.AMPLIFIERD_BASE_URL.replace(
+      /^(https?:\/\/)(127\.0\.0\.1|localhost)(?=[:/]|$)/,
+      '$1host.docker.internal',
+    );
+  }
+  env.NO_PROXY = 'host.docker.internal,127.0.0.1,localhost';
+  env.no_proxy = env.NO_PROXY;
   return { env };
 });
 
