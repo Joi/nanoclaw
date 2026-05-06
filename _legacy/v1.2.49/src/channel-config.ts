@@ -1,0 +1,411 @@
+/**
+ * Channel Config Reader for NanoClaw
+ * Reads YAML channel configs from ops/jibot/channels/ and provides
+ * floor-level and domain-grant lookups for access control decisions.
+ */
+import fs from 'fs';
+import path from 'path';
+import YAML from 'yaml';
+
+import { logger } from './logger.js';
+
+export interface ChannelConfig {
+  platform: string;
+  workspace: string;
+  channel_id: string;
+  channel_name: string;
+  floor: 'owner' | 'admin' | 'staff' | 'guest';
+  domains: string[];
+  /**
+   * How jibot engages with this channel:
+   *   active    — responds to every message (no trigger needed)
+   *   attentive — responds only when @jibot is mentioned, ingests all messages
+   *   silent    — never responds, never ingests (use with access.intake for filing)
+   */
+  listening_mode: 'active' | 'attentive' | 'silent';
+
+  /**
+   * Access flags (replaces DB registered_groups flags).
+   * Populated from YAML, applied to DB on startup.
+   */
+  access: {
+    reminders: boolean;
+    bookmarks: boolean;
+    email: boolean;
+    calendar: boolean;
+    file_serving: boolean;
+    intake: boolean;
+  };
+
+  /**
+   * Sender policy (replaces sender-allowlist per-chat mode).
+   *   allow   — messages pass through (default)
+   *   trigger — messages pass but sender must be on allowlist
+   *   drop    — block all messages for this channel
+   */
+  sender_policy: 'allow' | 'trigger' | 'drop';
+
+  /** Legacy field, still accepted in YAML. Use access.intake instead. */
+  confidential_intake?: boolean;
+
+  /**
+   * Capture mode controls per-message file emission:
+   *   standalone (default) — one intake .md file per message batch
+   *   digest                — append to a single daily digest file for this channel
+   * Use digest for lurker channels where per-message files create noise.
+   */
+  capture_mode?: 'standalone' | 'digest';
+  members: Record<string, { tier: string; person_ref?: string }>;
+
+  /**
+   * Engine routing (added 2026-05-05 for joi-1l51 — NanoClaw → remote Amplifier session pipe).
+   * - 'claude-agent-sdk' (default): existing behavior, runs in podman/docker container locally.
+   * - 'amplifier-remote': forwards prompts to amplifierd over HTTP (e.g. macazbd via ZeroTier).
+   *
+   * Dispatched ONLY if the 4-layer safety predicate in
+   * src/runners/amplifier-remote/safety.ts passes:
+   *   (1) engine === 'amplifier-remote'
+   *   (2) floor === 'owner'
+   *   (3) channel_name ends in -dm AND chat_jid matches a DM JID prefix
+   *   (4) sender ∈ allowed_senders AND !is_from_me AND allowed_senders non-empty
+   * Any failure falls through to the claude-agent-sdk path with a warn log.
+   */
+  engine?: 'claude-agent-sdk' | 'amplifier-remote';
+
+  /**
+   * Allowed senders for amplifier-remote (REQUIRED when engine=amplifier-remote;
+   * empty/missing rejects all messages — refuse-by-default fail-closed semantics).
+   * Format: platform-native sender ID, e.g. '+819048411965' for Signal.
+   */
+  allowed_senders?: string[];
+  /**
+   * Auto-file bare URLs (whitespace + URL + whitespace, nothing else) to the
+   * knowledge-intake sprite. When true, single-message batches that ARE a bare
+   * URL get intercepted: NanoClaw POSTs to the sprite, replies with a brief
+   * confirmation, and skips the agent dispatch entirely. Default false.
+   * Added 2026-05-06 for joi-k1x9 prompt-chain redesign.
+   */
+  auto_url_intake?: boolean;
+}
+
+/** Port mapping for access-tiered QMD MCP services.
+ * Base ports (public, crm) are hardcoded.
+ * Domain ports are loaded from ~/.config/qmd/fleet.yaml at startup.
+ * Adding a new domain only requires updating fleet.yaml — no NanoClaw rebuild needed.
+ */
+function loadQmdPorts(): Record<string, number> {
+  const base: Record<string, number> = { public: 7333, crm: 7334 };
+  const fallback: Record<string, number> = {
+    'domain-gidc': 7335, 'domain-sankosh': 7336, 'domain-bhutan': 7337,
+    'domain-gmc': 7338, 'domain-wikipedia': 7339, 'domain-jp-ai-agent-startup': 7340,
+  };
+  try {
+    const fleetPath = path.join(process.env.HOME ?? '/Users/jibot', '.config/qmd/fleet.yaml');
+    const fleet = YAML.parse(fs.readFileSync(fleetPath, 'utf-8')) as
+      { domains?: Record<string, { port: number }> };
+    for (const [name, cfg] of Object.entries(fleet.domains ?? {})) {
+      base[name] = cfg.port;
+    }
+  } catch {
+    Object.assign(base, fallback);
+  }
+  return base;
+}
+export const QMD_PORTS: Record<string, number> = loadQmdPorts();
+
+/** Map from confidential/{slug} path to QMD index name */
+function domainToIndexName(domain: string): string | null {
+  const match = domain.match(/^confidential\/(.+)$/);
+  if (!match) return null;
+  return `domain-${match[1]}`;
+}
+
+/**
+ * Load all channel configs from a directory of YAML files.
+ * Returns a Map keyed by channel JID (e.g., "slack:gidc:channel:C12345678").
+ */
+export function loadChannelConfigs(
+  configDir: string,
+): Map<string, ChannelConfig> {
+  const configs = new Map<string, ChannelConfig>();
+
+  let files: string[];
+  try {
+    files = fs.readdirSync(configDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+  } catch {
+    logger.warn({ configDir }, 'channel-config: cannot read config directory');
+    return configs;
+  }
+
+  for (const file of files) {
+    try {
+      const raw = fs.readFileSync(path.join(configDir, file), 'utf-8');
+      const parsed = YAML.parse(raw) as ChannelConfig;
+
+      if (!parsed.platform || !parsed.channel_id) {
+        logger.warn({ file }, 'channel-config: skipping (missing platform or channel_id)');
+        continue;
+      }
+
+      // Validate listening_mode
+      const modeRaw = String(parsed.listening_mode ?? 'attentive');
+      if (!['active', 'attentive', 'silent'].includes(modeRaw)) {
+        logger.warn({ file, mode: modeRaw }, 'channel-config: unknown listening_mode, defaulting to "attentive"');
+        parsed.listening_mode = 'attentive';
+      }
+
+      // Apply access defaults
+      if (!parsed.access) {
+        parsed.access = {
+          reminders: false,
+          bookmarks: false,
+          email: false,
+          calendar: false,
+          file_serving: false,
+          intake: parsed.confidential_intake ?? (parsed.domains?.length > 0),
+        };
+      }
+
+      // Apply sender_policy default
+      if (!parsed.sender_policy) {
+        parsed.sender_policy = 'allow';
+      }
+
+      // Validate engine (added 2026-05-05 for joi-1l51).
+      // Default to 'claude-agent-sdk' for backward compat. Unknown values reject to default.
+      const engineRaw = parsed.engine === undefined ? 'claude-agent-sdk' : String(parsed.engine);
+      if (!['claude-agent-sdk', 'amplifier-remote'].includes(engineRaw)) {
+        logger.warn({ file, engine: engineRaw }, 'channel-config: unknown engine, defaulting to "claude-agent-sdk"');
+        parsed.engine = 'claude-agent-sdk';
+      } else {
+        parsed.engine = engineRaw as ChannelConfig['engine'];
+      }
+
+      // Validate allowed_senders (only meaningful when engine=amplifier-remote).
+      if (parsed.allowed_senders !== undefined && !Array.isArray(parsed.allowed_senders)) {
+        logger.warn({ file, allowed_senders: parsed.allowed_senders }, 'channel-config: allowed_senders must be array, ignoring');
+        parsed.allowed_senders = [];
+      }
+      if (parsed.engine === 'amplifier-remote') {
+        if (!parsed.allowed_senders || parsed.allowed_senders.length === 0) {
+          logger.warn({ file, channel_name: parsed.channel_name }, 'channel-config: engine=amplifier-remote with empty allowed_senders — runner will refuse all messages (fail-closed)');
+        }
+        if (parsed.floor !== 'owner') {
+          logger.warn({ file, floor: parsed.floor, channel_name: parsed.channel_name }, 'channel-config: engine=amplifier-remote requires floor=owner — runner will refuse all dispatch');
+        }
+      }
+
+      // Build JID key.
+      // Each platform's channel module uses a specific JID format for inbound messages.
+      // The YAML channel_id can be either the full JID or a bare platform-native ID.
+      // If bare, we auto-construct the correct JID using the platform's format.
+      //
+      // Platform JID formats (from channel modules):
+      //   WhatsApp/Signal: platform-native JID used as-is (e.g., "120363...@g.us", "sig:group:...")
+      //   Discord: "dc:{guildId}:{channelId}" or "dc:dm:{userId}" (discord.ts L52-54)
+      //   Telegram: "tg:{chatId}" (telegram relay)
+      //   Slack: "slack:{workspace}:{userId}" (DM) or "slack:{workspace}:channel:{channelId}"
+      //   Email: "email:{address}"
+      let jid: string;
+      const cid = String(parsed.channel_id);
+      if (
+        // Already a full JID with known prefix — use as-is
+        cid.startsWith("dc:") || cid.startsWith("tg:") || cid.startsWith("line:") ||
+        cid.startsWith('sig:') || cid.startsWith('slack:') ||
+        cid.startsWith('email:') || cid.includes('@')
+      ) {
+        jid = cid;
+      } else if (parsed.platform === 'whatsapp' || parsed.platform === 'signal' || parsed.platform === 'email') {
+        // These platforms use platform-native IDs directly
+        jid = cid;
+      } else if (parsed.platform === 'discord') {
+        // Discord uses dc:{guildId}:{channelId}. Workspace = guildId.
+        if (parsed.workspace) {
+          jid = `dc:${parsed.workspace}:${cid}`;
+        } else {
+          logger.warn({ file, platform: parsed.platform }, 'channel-config: Discord channel missing workspace (guild ID)');
+          jid = `dc:${cid}`;
+        }
+      } else if (parsed.platform === 'telegram') {
+        // Telegram uses tg:{chatId}
+        jid = `tg:${cid}`;
+      } else if (parsed.platform === 'line') {
+        // LINE uses line:{groupId} for groups (IDs start with C/R)
+        // and line:dm:{userId} for DMs (IDs start with U).
+        // If channel_id already has the dm: prefix, pass through.
+        if (cid.startsWith('dm:') || cid.startsWith('line:')) {
+          jid = cid.startsWith('line:') ? cid : `line:${cid}`;
+        } else if (cid.startsWith('U')) {
+          jid = `line:dm:${cid}`;
+        } else {
+          jid = `line:${cid}`;
+        }
+      } else {
+        // Slack and others: {platform}:{workspace}:channel:{id}
+        const ns = parsed.workspace ? `${parsed.platform}:${parsed.workspace}` : parsed.platform;
+        jid = `${ns}:channel:${cid}`;
+      }
+      configs.set(jid, parsed);
+
+      logger.debug({ jid, floor: parsed.floor, mode: parsed.listening_mode, file }, 'channel-config: loaded');
+    } catch (err) {
+      logger.warn({ file, err }, 'channel-config: failed to parse');
+    }
+  }
+
+  logger.info({ count: configs.size, configDir }, 'channel-config: loaded configs');
+  return configs;
+}
+
+/**
+ * Get channel config for a specific JID.
+ */
+export function getChannelConfig(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): ChannelConfig | null {
+  return configs.get(jid) ?? null;
+}
+
+/**
+ * Get the floor level for a channel.
+ * Returns 'guest' for unknown channels (safe default).
+ */
+export function getFloorLevel(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): 'owner' | 'admin' | 'staff' | 'guest' {
+  const config = configs.get(jid);
+  return config?.floor ?? 'guest';
+}
+
+/**
+ * Get the listening mode for a channel.
+ * Returns null for unknown channels (caller uses DB requiresTrigger as fallback).
+ */
+export function getListeningMode(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): 'active' | 'attentive' | 'silent' | null {
+  const config = configs.get(jid);
+  return config?.listening_mode ?? null;
+}
+
+/**
+ * Get domain grants for a channel.
+ * Returns empty array for unknown channels.
+ */
+export function getDomainGrants(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): string[] {
+  const config = configs.get(jid);
+  return config?.domains ?? [];
+}
+
+/**
+ * Get the QMD MCP ports that should be mounted for a channel,
+ * based on its floor level and domain grants.
+ *
+ * Returns a Record mapping index name to port number.
+ */
+export function getQmdPorts(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): Record<string, number> {
+  const config = configs.get(jid);
+  const ports: Record<string, number> = {};
+
+  // Everyone gets public
+  ports.public = QMD_PORTS.public;
+
+  if (!config) return ports;
+
+  const floor = config.floor;
+  const isAdminOrOwner = floor === 'admin' || floor === 'owner';
+
+  // Admin/Owner get CRM access
+  if (isAdminOrOwner) {
+    ports.crm = QMD_PORTS.crm;
+  }
+
+  // Add domain-specific ports based on grants
+  for (const domain of config.domains) {
+    const indexName = domainToIndexName(domain);
+    if (indexName && QMD_PORTS[indexName]) {
+      ports[indexName] = QMD_PORTS[indexName];
+    }
+  }
+
+  return ports;
+}
+
+
+/**
+ * Get access flags for a channel.
+ * Returns all-false defaults for unknown channels.
+ */
+export function getAccessFlags(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): ChannelConfig['access'] {
+  const config = configs.get(jid);
+  return config?.access ?? {
+    reminders: false,
+    bookmarks: false,
+    email: false,
+    calendar: false,
+    file_serving: false,
+    intake: false,
+  };
+}
+
+/**
+ * Get sender policy for a channel.
+ * Returns 'allow' for unknown channels (safe default).
+ */
+export function getSenderPolicy(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): 'allow' | 'trigger' | 'drop' {
+  const config = configs.get(jid);
+  return config?.sender_policy ?? 'allow';
+}
+
+/**
+ * Get the engine for a channel (added 2026-05-05 for joi-1l51).
+ * Returns 'claude-agent-sdk' (default) unless the channel YAML opts into
+ * 'amplifier-remote'. Note: this is the *configured* engine. The actual
+ * dispatch is gated by the 4-layer safety predicate in
+ * src/runners/amplifier-remote/safety.ts.
+ */
+export function getEngine(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): 'claude-agent-sdk' | 'amplifier-remote' {
+  return configs.get(jid)?.engine ?? 'claude-agent-sdk';
+}
+
+/**
+ * Get the allowed_senders list for amplifier-remote dispatch (added 2026-05-05 for joi-1l51).
+ * Returns empty array when missing — fail-closed default that causes the
+ * safety predicate to refuse all amplifier-remote dispatches.
+ */
+export function getAllowedSenders(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): string[] {
+  return configs.get(jid)?.allowed_senders ?? [];
+}
+
+/**
+ * Whether this channel should auto-file bare URLs to knowledge-intake.
+ * Defaults to false. Set `auto_url_intake: true` in YAML to opt in.
+ * Added 2026-05-06 for joi-k1x9.
+ */
+export function getAutoUrlIntake(
+  jid: string,
+  configs: Map<string, ChannelConfig>,
+): boolean {
+  return configs.get(jid)?.auto_url_intake === true;
+}

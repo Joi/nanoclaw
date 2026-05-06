@@ -1,0 +1,119 @@
+cac14532d160eb79e4061d35ccd4b0e1b8b521ac 2026-05-06 feat(intake): bare-URL auto-intake via knowledge-intake sprite (joi-k1x9)
+f5649d9223aad5bebec0fc4a880486443e315777 2026-05-05 feat(runner): pass AMPLIFIERD_WORKING_DIR per-session (joi-1l51)
+1e9a7b4e1a5e0c18acb5e694982dde3c7e4fd9d3 2026-05-05 fix(security): add 256KB prompt-size cap to executePrompt (joi-1l51)
+08ff14fded1133be277367737a51822ffbce18ae 2026-05-05 fix(client): migrate from globalThis.fetch to node:http (joi-1l51 live-test)
+51c7e0f50d2f9759e78d13cd154d8504cfd23955 2026-05-05 fix(runner): auto-recover from stale amplifierd session-id (joi-1l51 live-test)
+32e682d4846dfdd5649874f2cb5e2fe436649095 2026-05-05 feat(runner): add amplifier-remote engine for NanoClaw → remote Amplifier pipe
+bd1b470fd479df7dd6dd34edc077defb9ece3e10 2026-05-05 fix(access-control): Signal groups no longer misclassified as DMs
+7d1ac8cad6e6c17d5d334b2f1eb0105c92cd33c2 2026-04-30 fix(email): add circuit breaker for thread-fetch maxBuffer failures
+de21888ae88ea2aa82c639263005e3bdbc1aaa1e 2026-04-30 chore(whatsapp): harden Baileys init-query timeout to 120s (jibot-code-5m2)
+7e419aa7d25226096004ebd64f8e1eab68a86392 2026-04-30 feat(ipc): re-introduce sendFile through JSON IPC, with 60s timeout hardening (#2)
+cf40d0f7709670e82ff6c674e8c0672aee9f0894 2026-04-30 Revert "feat(ipc): wire sendFile through JSON IPC for document attachments (#1)"
+1a9ae8527d3402ab20bf8452bb7a3d72484d1edb 2026-04-30 feat(ipc): wire sendFile through JSON IPC for document attachments (#1)
+c511badb93af972c54dd9d222053e38c9a1a9077 2026-04-28 fix(access-control): handle Discord DM JIDs + WhatsApp @lid format
+a01ae23d668ec0ea6ce2288817dea4f8040c12c7 2026-04-25 feat(nanoclaw): wire Phase 6 capabilities into main message flow
+a3128a76b244cd61713763863e54ad502c06d802 2026-04-22 fix(slack): resolve Slack handles via multi-alias name index (jibot-code-cwl)
+ff6b402c9a443abaea6d7e13135ae9f1836a4348 2026-04-18 feat(intake): per-channel capture_mode routing (joi-sd4)
+6fbf44ce1bc8e155360c92343aa6847a73c0e68c 2026-04-17 fix: resolve scheduled task group by chat_jid before folder
+c56edaacfd12ae56d146a86bfd14aa1697b7341b 2026-04-16 feat: add /api/join endpoint for Zoom bot orchestrator forwarding
+702684d837847591acc26fc31a047787a1357778 2026-04-16 refactor: rename voice-api to agent-api (general-purpose agent endpoint)
+ef171d69becd5e7da35f8d46a7890ef0e82cef6d 2026-04-15 fix: resolve @mentions in outgoing Slack messages
+380f4e8a9dfb44b8f1706e7041f9b87042ed83d9 2026-04-14 feat: add LINE Messaging API channel
+542b0a9b495974a27e5b9b90b7defb36f05e2270 2026-04-14 feat: bidirectional Discord mention resolution
+d8a9cbb7e452bdbe7f3a102f8b7fa2b95f1f6180 2026-04-14 fix: Discord @mentions now replace in-place instead of strip-and-prepend
+6ca858659e7e4a1bd8fdd897345631f830862829 2026-04-14 feat: resolve sender names and channel names in intake files
+a51b07b1ee8b24af285187b9640f97d0eec08ee4 2026-04-14 feat: implement YAML→DB sync on startup (config normalization Phase 2)
+a5895c7eb15a7626619c050db1799870e846d33f 2026-04-14 fix: rename Andy to jibot everywhere + add stale trigger migration
+8a40c44b8def5be1c223193b6364808dc3024b2a 2026-04-14 fix: revert clientReady back to ready (Discord.js compat)
+5713d8978eb6876ac6c9cd60b44f3853ce0aa2c7 2026-04-14 fix: translate LID mentions to @jibot in WhatsApp messages
+fc4689f91dcc85abf0bcd2ce8ac3811e029017e4 2026-04-14 feat: YAML-first config normalization -- Phase 2
+a41cd4d68345371f6e5a1ad2b44a329a49fcf08f 2026-04-10 feat: rewrite process-email skill to use Syncthing trigger pattern
+d518cf5956e6a8cbefe3fa2305e1660ebe128933 2026-04-10 feat: add process-email skill for on-demand email triage
+6fb2516925f2e64ee27228d2f43075b46678d29b 2026-04-10 fix: strip @ from mention text to prevent @@Name double-prefix
+580217caf2c272b9aa7e524bccd23b0417aadd8b 2026-04-10 feat: add proper Signal @mention support for outbound messages
+bb94183b9545d030806376410ea6ace7d20883fe 2026-04-08 feat: sender context enrichment via QMD people pages
+623c9a4fea77676136b3622ba2240de7857c150b 2026-04-07 feat: add computePermittedScope function for DM and group workstream resolution
+4e2796b1033522f1e04be2af9caa886c1eeea2af 2026-04-07 feat: add AllowlistGroup schema and resolveGroupMembers function
+7f0d9a55c5dd4f288a95ab36bfe5144596ab3496 2026-04-07 fix: guard against malformed non-array workstreams in getGroupWorkstreams
+9294d953f22e24d62391ac5638d17dbf67d12339 2026-04-07 feat: add getGroupWorkstreams intersection function
+55c9f455a2b347dd0405077aa52a603941becf8c 2026-04-07 fix: guard against malformed user.workstreams in getUserWorkstreams
+20106382690343bb45142ec4bedb5c6d73ddcdf0 2026-04-07 feat: add getUserWorkstreams resolution function
+653afa8ea36e00a29dbbe5508ccb6e077444218f 2026-04-07 fix: harden resolveUser against malformed users config
+016f398adf8fe6fa19b066da02fc56d9854f07fe 2026-04-07 feat: add resolveUser function (JID→user lookup)
+22f11144530cab55be985a4ef8af51dab1af3563 2026-04-07 feat: add AllowlistUser and WorkstreamInfo types to sender-allowlist
+f048294836d7d1f667425dd417b28e24b96fcef6 2026-04-07 fix: guard non-string name values in wikiLinkMentions
+f5682468b5c88f9c21dd33852cadd7d0492a4f4a 2026-04-07 fix: route #ws:{slug} tagged emails to workstream intake dirs
+0d8c7140f49d7f78bd06b5dfc71b357ef82a20d3 2026-04-06 fix(whatsapp): fetch latest WA Web version to prevent 405 rejection
+57b4aae1b94e5b718ae70048094123cd5e780880 2026-04-06 fix(whatsapp): add pino-compatible logger shim and unblock startup on close
+58c752f52ac73eacbe490391b61b95f51cccc64b 2026-04-06 test(email): add EmailChannel unit tests (Task 17)
+032537ca1a01570b3e70e0babf32d00f740580a9 2026-04-06 feat(email): rewrite EmailChannel v2 with full pipeline (Task 16)
+ec6ea9a62b780cfb42f2d5594b21729a840805ad 2026-04-06 feat(email): add durable receipt artifact generator (Task 15)
+e4221cdd0c582a664a1f315544a6aa77e3970291 2026-04-06 feat(email): add reminder adapter via EventKit bridge (Task 14)
+93cc050eb6a38ecbd3ddf5c97e8dfa9585acabaf 2026-04-06 feat(email): add calendar adapter via gog CLI (Task 13)
+cc66f753d407ee0a90bb68d301af5108ebc72f06 2026-04-06 feat(email): add approval gate with Signal notification (Task 11)
+268ddcf32ce645314808b68686a6b9017a4f2168 2026-04-06 feat(email): add thread session store (Task 10)
+5658366097fe484b2c94c379032cdd74f8538222 2026-04-06 feat(email): add attachment type filter (Task 9)
+838ba15c280e670a74a07374e4493b12fd3f886f 2026-04-06 feat(email): add reply recipient sanitizer (Task 8)
+e2523263affa63c7dbf4a33a71f1acf19b37f801 2026-04-06 feat(email): add email policy adapter for tier enforcement (Task 7)
+b1b8527bb58bf58418169f75be3498556f0e9eb9 2026-04-06 feat(email): add intent resolver with action subtype classification (Task 6)
+2916bd45a841ff08679926d58d8cc8811fe4fc61 2026-04-06 feat(email): add email identity resolver with two-tier lookup (Task 5)
+189df86ea776e17b0218e814d2d75270d16193b7 2026-04-06 feat(email): add email alias map loader (Task 4)
+d33a5a63c1115f7dafc9a7a15a0d32eb921b76e2 2026-04-06 feat(email): add email address parsing utility (Task 3)
+48cb7d4d2a70af59eace090500dc7ad20a7b6f74 2026-04-06 feat(email): add database schema for email thread sessions and approvals
+83b7e634574fff1604faf2d9afa25550c8693d54 2026-04-05 fix: resolve Slack mentions via identity index before Slack API
+92625a380a9fde5877867b340874355e32faf8ff 2026-04-05 feat: expand Slack user mentions to real names before passing to agent
+b96c8d6d13012cbe0d7582ab196be96b37a5d5ac 2026-04-05 fix: accept 'allow' mode in sender allowlist validation
+d3af871597bd9d981173e15f22bf80b03c49bf6e 2026-04-05 fix: use default import for pdf-parse CommonJS module
+65e02a6cfab97eae1419a5fce0e28809a9785dbe 2026-04-05 feat: add DM access control with identity-based gating
+f8964fdac0eca3e09deea372d804559322765cc1 2026-04-05 fix: add event method to Slack mock for member event handler tests
+6270210cac1db0c5ccdfb57f660eb8594ded55c2 2026-04-05 feat: handle member_joined/left_channel events for floor tracking
+d2314382cb606f10687cf5d8e9b25da6d99b426d 2026-04-05 feat: per-user container folders from tier templates
+c5640e20c322b39fbdff90de3cb4d13538719f2b 2026-04-05 refactor: rename assistant tier to admin
+0ced4455cb8f8124453f6d86b00beebd6294c82a 2026-04-05 feat: update NanoClaw from 1.2.12 to 1.2.49 with local customizations preserved
+3f499ddc7c270dcbe7a85d317b43c1bf25a02ad2 2026-04-05 feat: downgrade baileys to v6, add media handling, Signal formatting, and logTriggeredOnly
+0a0e6222867c0b1ef003f7b40a8cd3dd1046b60f 2026-03-29 fix: add reconnection logic to Signal channel
+a9291f5e669f6b562047bfbd1d9ebeb83cfd4203 2026-03-26 feat: add user_manage IPC handler for adding/removing GIDC users
+57399757b1a078ff0870803b5748aa9e0e58bba5 2026-03-26 refactor: unify path resolution and return shallow copy in listAllowlistEntries
+023e283b10991101b427d782ba0200c56463718d 2026-03-26 feat: add addAllowlistEntry, removeAllowlistEntry, listAllowlistEntries for programmatic user management
+80b4d14b5d9a11da0d11dbfa971d3a07820c20ed 2026-03-26 fix: restore addAllowlistEntry/removeAllowlistEntry to fix broken TypeScript build
+5f872b4a89bbcd2e91cba7229e347f44d215351f 2026-03-26 chore: remove extra functions beyond task-4 scope (addAllowlistEntry, removeAllowlistEntry, listAllowlistEntries)
+a5c4b6c8ef942a5c1dd12ddf3232f06b80e30ec5 2026-03-26 feat: add sendFile() method to SlackChannel using files.uploadV2
+6fbe216accd746b275cf14213bcf8e13543a15c9 2026-03-26 fix: correct sendFile test setup per spec — nested files.uploadV2, remove fs mock extras
+176e70900b67e7cff8af530e9f40460fe63e6432 2026-03-24 fix: session crash recovery — retry with fresh session on resume failure
+6c24f30dd4e890d0d6df3d54235c9d88ead71e93 2026-03-24 feat: add QMD MCP type:http + email attachments
+e0071a01c2254b463b55aa01368dd0203e6e9d13 2026-03-24 feat(email): download and pass attachments to container agents
+c10f52e72755ed13b6d92fc824ee04965dc31fbd 2026-03-23 feat: Slack PDF extraction + history catchup on reconnect
+45036c9aca9a5efe7579023c3700e781ac1854ba 2026-03-23 feat: Slack history catchup on connect/reconnect
+7e183ec26948681d2296d55253c7cee4ab3bf815 2026-03-23 feat: Add Slack file attachment support and fix @mention trigger routing
+077157381679c12c8ec761c841f82e3a82a6de2b 2026-03-23 feat: enable QMD search for GIDC admin DMs
+fbbe2b9adf0bf5dfdd4d835d450c6294620304ff 2026-03-22 feat: add user_manage IPC handler for GIDC user add/remove
+11576bdbe8d73bafd19c27d62b826bdb85b62c66 2026-03-22 fix: prevent DEFAULT_CONFIG mutation in loadSenderAllowlist fallback paths
+8d06adcad5ecfbea63f26e62b2cc06c1c880ec87 2026-03-22 chore: fix code quality issues in sender-allowlist
+fc1f1eed87f83206ea9cf7615e8c8c4c26e5aac6 2026-03-22 feat: add addAllowlistEntry, removeAllowlistEntry, listAllowlistEntries
+5728eff25904c84066ff1460fdcc57ca2b08b314 2026-03-22 refactor: document intentional error propagation in saveSenderAllowlist
+103c248b920c2ba1abb8ba00192c08eb0061c3c8 2026-03-22 feat: add saveSenderAllowlist() to sender-allowlist.ts
+66a46060c911a08a3f135a95f9443f3b5cbdc985 2026-03-22 feat: add calendar_access DB column and update registered_groups read/write
+c3f03c3d8175d77d5bf5a16327bac19b4a462c2a 2026-03-22 fix: correct channelId extraction for channel JIDs; clean up minor style issues
+e2394a3efa8f8085737746d17127c4ecb07cf8e0 2026-03-22 feat: add GIDC command parser for mode switching and scan
+4423792b12371ab6d86dff32d542af7b99186cc5 2026-03-22 fix: quote description frontmatter field to prevent YAML corruption on colons
+c3e94b99dd30a4825c8a412a49db41b0e2ca99fd 2026-03-22 fix: make IntakeMessage.text required per spec; update attachment-only test
+fae6414edf5b3dbd75fd67107fc97b1e65bcce5c 2026-03-22 fix: update intake tests for spec interface alignment
+e38ed1b8faf10b38963360a2abccf51d0e7a615c 2026-03-22 feat: add intake module for Slack message capture with frontmatter
+1c33ee1e9dbbd7b7fe676e39b6b094b2b89d16ca 2026-03-22 test: verify fs.createReadStream call in sendFile tests; reformat vi.mock(fs) block
+72c7577df6b5d2ca81862845089b08f4781833d3 2026-03-22 fix: align sendFile() with spec — fs import, filePath signature, filesUploadV2, createReadStream
+246c3b01b6f0a182b5720fe67ba289c9c3a471bb 2026-03-22 feat: add sendFile() method to SlackChannel using files.uploadV2
+860b93fd7fbcea1eba8aa0945214bc4c793104bf 2026-03-22 refactor: remove unused app variable in sendFile tests 1 and 3
+dbc7ce0ed6aa3f9fe576d0d6f3edb77b3e34c001 2026-03-22 test: add sendFile tests to slack.test.ts
+7786067ab3e1f5f6eb9a9314c6130d05ad7cd903 2026-03-22 chore: phase 1 verification complete
+e76dfd4abe1158ce786bc9b3186b7974f7840f39 2026-03-22 test: add slack.test.ts with namespace isolation and ownsJid coverage
+a22ce7b41e678326f125b254bdf9df4bd0389f20 2026-03-18 feat: NeMo Guardrails integration + deny-all auto-register gate
+5b78784b838e7136934a1bd3a9d9505343deea83 2026-03-18 fix: add --max 25 to gog calendar commands in meeting-prep skill
+faab70e5954dbc083fb0c78fc560534395f82b9b 2026-03-13 feat: email channel, credential proxy, sender allowlist, signal diagnostics
+af004648d736309fe263c89a11233839cae7262a 2026-03-13 feat: add Telegram channel, document-extractor skill, signal improvements
+dded8a79db1e1d3b1c9fcfe0dc0767c3a9b221fc 2026-02-25 fix: batch meeting prep to avoid timeouts and prevent scheduler double runs
+69ca18dea6332514847c71222e93e08c3572159f 2026-02-24 feat: add email sending, voice API, meeting prep, and fix timeout bugs
+fd3f8229838fc2bf011a4d3e83829578fb8cbbd3 2026-02-23 feat: add gog-calendar skill so container agents know about Google Calendar CLI
+fcff9d7f05fbd10284148afdef2d402fb2511bc2 2026-02-23 feat: add Slack channel, bookmarks system, email intake, and account linking
+12ad34abc5d3e0d09bd47396b19214c5f3b24b11 2026-02-23 feat: add Apple Reminders bridge, canSeeAllTasks flag, fix signal receive
+de72b3ccb87eb20655e594318ad6be4b0e21b25c 2026-02-23 feat: fix Signal poll overlap and add multi-tier auto-registration
+d0fdb503de32eb58e3a0c72ed58425e480c66d4a 2026-02-23 feat: add Signal channel via signal-cli JSON-RPC
