@@ -411,6 +411,14 @@ function evaluateEngage(
       // Sticky follow-up: session already exists for this (agent, mg, thread)
       // — the thread was activated before, keep firing.
       if (mg.is_group === 0) return false; // DMs never use mention-sticky sensibly
+      // Stickiness only makes sense in genuinely threaded conversations.
+      // For flattened channels (supportsThreads=false on Discord/Slack,
+      // and Signal which doesn't model threads), threadId is always null
+      // and findSessionForAgent(...,null) matches the channel-wide session
+      // that's created on first engagement — so every subsequent message
+      // would engage, collapsing attentive mode into active mode. Require
+      // a real thread for the sticky path.
+      if (threadId === null) return false;
       const existing = findSessionForAgent(agent.agent_group_id, mg.id, threadId);
       return existing !== undefined;
     }

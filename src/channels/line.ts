@@ -34,6 +34,7 @@ import http from 'http';
 
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
+import { ASSISTANT_NAME } from '../config.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 
@@ -267,6 +268,16 @@ class LineChannelAdapter implements ChannelAdapter {
       this.setupConfig?.onMetadata(platformId, senderName, false);
     }
 
+    // Group-mention detection (mirror of signal.ts / whatsapp.ts pattern).
+    // LINE's webhook payload includes message.mention.mentionees[] with
+    // isSelf for native picker mentions, but the simpler text-match
+    // catches both that case (the bot's display-name normally appears
+    // as "@jibot" in the rendered text) and explicit "jibot" mentions.
+    // Without this, attentive LINE groups never engage because
+    // mention-sticky requires isMention=true.
+    const text = event.message.text || '';
+    const botMentionedInGroup =
+      isGroup && new RegExp(`(?:^|\\W)@?${ASSISTANT_NAME}(?:$|\\W)`, 'i').test(text);
     this.setupConfig?.onInbound(platformId, null, {
       id: event.message.id,
       kind: 'chat',
@@ -276,10 +287,8 @@ class LineChannelAdapter implements ChannelAdapter {
       // DMs are by definition addressed to the bot — same convention as the
       // Signal and WhatsApp native adapters. Without this flag, routeInbound
       // treats DMs as plain chatter and silently drops them at line 209
-      // (`if (!isMention) return`). Group/room mention detection (LINE's
-      // message.mention.mentionees with isSelf) is a future enhancement;
-      // until then groups require explicit DM-style addressing.
-      isMention: !isGroup ? true : undefined,
+      // (`if (!isMention) return`).
+      isMention: !isGroup || botMentionedInGroup ? true : undefined,
     });
   }
 

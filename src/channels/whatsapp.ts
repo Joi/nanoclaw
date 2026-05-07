@@ -611,6 +611,16 @@ registerChannelAdapter('whatsapp', {
               }
             }
 
+            // Group-mention detection: WhatsApp's native @-mention (via the
+            // picker) gets normalized to "@jibot" by the LID rewrite above
+            // (line 572), so a single text-match against the assistant name
+            // catches both the native @-mention case AND plain text mentions
+            // like "jibot, ping?". Same convention as signal.ts. Without
+            // this, attentive WA groups never engage because mention-sticky
+            // requires isMention=true and the router has no text-match
+            // fallback.
+            const isBotMentionedInGroup =
+              isGroup && new RegExp(`(?:^|\\W)@?${ASSISTANT_NAME}(?:$|\\W)`, 'i').test(content);
             const inbound: InboundMessage = {
               id: msg.key.id || `wa-${Date.now()}`,
               kind: 'chat',
@@ -618,7 +628,7 @@ registerChannelAdapter('whatsapp', {
               // platform-confirmed mentions so the router auto-creates an
               // approval-required messaging_group when the chat is unknown,
               // instead of silently dropping.
-              isMention: !isGroup ? true : undefined,
+              isMention: !isGroup || isBotMentionedInGroup ? true : undefined,
               isGroup,
               content: {
                 text: content,
